@@ -1061,6 +1061,16 @@ This flow applies equally to key rotation, account sale, gift, or organizational
 6. A wallet might display `P` as a folder-like parent containing child accounts and their assets, but `C1` and `C2` remain separate custody addresses.
 7. The hierarchy MAY be extended further by having `C1` or `C2` own additional controlling NFTs for deeper descendants.
 
+#### Capability decomposition through child accounts
+
+1. An organization controls parent account `P` through controller token `T_P`.
+2. The organization deploys purpose-specific child accounts: `Trading` for DeFi positions, `Governance` for DAO voting and delegation, `Payroll` for employee payments, `IP` for on-chain intellectual property and licensing, `Subscriptions` for recurring protocol fees.
+3. `P` holds the controller NFTs for all five child accounts. Each child is a separate custody address with its own balances, approvals, and execution history.
+4. Each child can be independently operated: a trading desk runs `Trading` via a session-key validator, HR operates `Payroll` through a different validator with spending-limit hooks, and `Governance` is operated directly by the board through `P`.
+5. Each child is independently transferable. The organization can divest its trading operation by transferring `T_Trading` to an acquirer - the trading positions, LP tokens, and protocol relationships remain at `Trading`'s address. The other four child accounts are unaffected.
+6. Each child is independently revocable. If the trading desk's session key is compromised, `resetDelegations` on `T_Trading` invalidates that authority without touching the other four accounts.
+7. The root deed (`T_P`) is all-or-nothing for `P`'s own assets, but the child deed structure decomposes that control into transferable, delegable, revocable capability containers - each one a self-contained operational unit that can be sold, handed off, frozen, or escrowed independently.
+
 #### Withdraw from a privacy pool with sponsored gas
 
 1. A sponsor or relayer calls `deployAccount(initialOwner = Bob)` to deploy account `A` and mint controller token `T` to Bob.
