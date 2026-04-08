@@ -129,6 +129,7 @@ For the purposes of this ERC:
 - **Transfer approval version** means a per-token monotonically increasing counter used internally to invalidate stale [ERC-721](./eip-721) single-token approvals on the controller token.
 - **Pending unlock delay change** means a requested reduction in `unlockDelayOf(tokenId)` that has been scheduled via `setUnlockDelay` but has not yet taken effect. Increases to the unlock delay take effect immediately and never produce a pending change. A pending change is surfaced by the `UnlockDelayChangePending` event and the `pendingUnlockDelayOf` view.
 - **Deployed account** means an account whose controller token has been minted and whose runtime code has been deployed at the encoded address.
+- **Execution hook** means a contract installed by the current controller that intercepts execution before and after each call for policy enforcement. Hooks are version-scoped and may be scoped to direct execution, signed execution, or both.
 - **Signed execution** means an execution request authorized by the controller's [EIP-712](./eip-712) signature and submitted by a third-party relayer, rather than by a direct transaction from the controller.
 - **Execution nonce** means a per-account monotonically increasing counter that provides replay protection for signed execution requests.
 
@@ -543,6 +544,61 @@ Validators MAY implement:
 
 Validators are privileged for the signature-validation paths they service. If the account implements signed execution, validators also participate in the signature validation cascade for `executeWithSignature` and `executeBatchWithSignature`, meaning a validator that approves a signed execution request is authorizing account execution, not merely confirming a message signature. Validator installation SHOULD therefore be treated as a sensitive delegation for the active control version. When signed execution is implemented, session-key validators, automated-strategy validators, and other delegated-signer models can authorize execution through the signed execution path without requiring [ERC-4337](./eip-4337) or a non-standard execution interface.
 
+### Execution hooks (OPTIONAL)
+
+A compliant account MAY support execution hooks for policy enforcement. Hooks allow the current controller to install modules that intercept execution before and after each call without modifying the account implementation. Use cases include spending limits, approved-contract whitelists, time-based restrictions, and rate limiting.
+
+If an account supports execution hooks, the following requirements apply. Within this section, "MUST" refers to requirements on implementations that include execution hooks.
+
+#### Hook scope
+
+Each hook installation MUST specify a scope that determines which execution paths trigger the hook:
+
+- **Direct** (`scope = 1`) — the hook fires only on direct owner execution (`execute`, `executeBatch`).
+- **Signed** (`scope = 2`) — the hook fires only on signed execution (`executeWithSignature`, `executeBatchWithSignature`), if implemented.
+- **All** (`scope = 3`) — the hook fires on both paths.
+
+The scope distinction allows a controller to impose policy on delegated signers without constraining their own direct execution. For example, a controller MAY install a spending-limit hook scoped to signed execution so that session-key validators are rate-limited while the controller's own direct transactions are unrestricted.
+
+#### Installation and lifecycle
+
+The current `ownerOf(tokenId)` MAY call `installHook(hook, scope, data)` to install a hook for the current control version. Multiple hooks MAY be installed; they execute in installation order. `data` is passed to the hook's `onInstall` callback.
+
+A hook installation MUST be scoped to the current control version at installation time. A hook MUST be considered active only while its recorded activation version equals the current `controlVersionOf(tokenId)`. Transfer of the controlling NFT or a call to `resetDelegations` therefore invalidates all installed hooks, identically to validators.
+
+The current `ownerOf(tokenId)` MAY call `uninstallHook(hook, data)` to remove a specific hook. `data` is passed to the hook's `onUninstall` callback. Only hooks installed under the current control version can be uninstalled.
+
+`isHookActive(hook)` MUST return `true` if the hook is installed and its activation version equals the current `controlVersionOf(tokenId)`, and `false` otherwise.
+
+#### Execution semantics
+
+For each individual call within `execute`, `executeBatch`, `executeWithSignature`, or `executeBatchWithSignature`, the account MUST invoke active hooks whose scope matches the execution path:
+
+1. **Before execution.** For each active matching hook in installation order, call `beforeExecute(caller, target, value, data)` on the hook. `caller` MUST be `msg.sender` for direct execution and the recovered or validated signer address for signed execution. If any hook reverts or returns a value other than the `beforeExecute` selector (`IERCXXXXExecutionHook.beforeExecute.selector`), the entire execution MUST revert.
+2. **Execute the call.** Perform the `CALL` to `target` with `value` and `data`.
+3. **After execution.** For each active matching hook in installation order, call `afterExecute(caller, target, value, data, result)` on the hook. If any hook reverts, the entire execution MUST revert.
+
+For batch execution, hooks fire per call within the batch, not once for the entire batch. This allows hooks to track cumulative state (e.g. running spending totals) across calls within a single batch.
+
+Hooks MUST NOT fire for approval revocation functions. Revocation functions are safe-by-construction (hardcoded zero-approval calls) and must remain callable during the unlock freeze without hook interference.
+
+#### Hook events
+
+If execution hooks are implemented, the account MUST emit:
+
+```solidity
+event HookInstalled(
+    address indexed hook,
+    uint8 scope,
+    uint256 indexed controlVersion
+);
+
+event HookRemoved(
+    address indexed hook,
+    uint256 indexed controlVersion
+);
+```
+
 ### Public mempool, FOCIL, and VOPS considerations
 
 A compliant account MUST preserve the direct-owner ordinary-transaction execution path defined above. That path is the canonical public-mempool-visible execution path for this ERC. If an account implements signed execution, that path is also public-mempool-visible.
@@ -731,6 +787,11 @@ interface IERCXXXXAccount {
     function uninstallValidator(address validator, bytes calldata data) external;
     function isValidatorActive(address validator) external view returns (bool);
 
+    // Execution hooks (OPTIONAL) - policy enforcement on direct and/or signed execution.
+    function installHook(address hook, uint8 scope, bytes calldata data) external;
+    function uninstallHook(address hook, bytes calldata data) external;
+    function isHookActive(address hook) external view returns (bool);
+
     /// @dev ERC-721 token receiver (ERC-721 `ERC721TokenReceiver`).
     function onERC721Received(
         address operator,
@@ -775,6 +836,33 @@ interface IERCXXXXValidator {
         bytes32 boundMessageHash,
         bytes calldata authData
     ) external view returns (bytes4 magicValue);
+}
+```
+
+```solidity
+pragma solidity ^0.8.20;
+
+/// @dev Execution hook interface (OPTIONAL).
+interface IERCXXXXExecutionHook {
+    function onInstall(address account, bytes calldata data) external;
+    function onUninstall(address account, bytes calldata data) external;
+
+    /// @dev Called before each individual call. MUST return this function's selector to approve.
+    function beforeExecute(
+        address caller,
+        address target,
+        uint256 value,
+        bytes calldata data
+    ) external returns (bytes4);
+
+    /// @dev Called after each individual call with the result.
+    function afterExecute(
+        address caller,
+        address target,
+        uint256 value,
+        bytes calldata data,
+        bytes memory result
+    ) external;
 }
 ```
 
@@ -1126,7 +1214,9 @@ Signed execution introduces a public-facing execution entrypoint callable by any
 
 **`msg.value` forwarding.** Signed execution functions are `payable`, allowing relayers to forward ETH. If `msg.value` exceeds the total value consumed by calls in the execution, the excess remains in the account - it does not return to the relayer. Relayers SHOULD calculate the exact value needed. Controllers SHOULD be aware that a relayer can send unexpected ETH to the account through this path, though this is equivalent to anyone sending ETH to the account's `receive()` function.
 
-Reentrancy risk is inherent in arbitrary execution. `execute` and `executeBatch` call arbitrary targets. Implementations SHOULD ensure that sensitive state transitions, such as validator installation state or recovery-related state, cannot be corrupted by reentrant execution.
+If execution hooks are implemented, a malicious or buggy hook can deny service by always reverting in `beforeExecute`, effectively bricking execution for the scoped path. Because hooks are version-scoped, `resetDelegations` invalidates all hooks and restores execution. A hook installed with scope `All` that reverts unconditionally blocks both direct and signed execution until the controller calls `resetDelegations`. Controllers SHOULD test hooks before installing them with scope `All`. Hooks also add gas overhead to every call in their scope; implementations SHOULD bound the number of active hooks to prevent unbounded gas growth.
+
+Reentrancy risk is inherent in arbitrary execution. `execute` and `executeBatch` call arbitrary targets. Implementations SHOULD ensure that sensitive state transitions, such as validator installation state, hook installation state, or recovery-related state, cannot be corrupted by reentrant execution.
 
 Batching hazards are substantial. Atomicity avoids partially completed multi-step workflows, but the content of the batch can still create risky approval-before-use patterns, downstream callback surfaces, and hidden ordering assumptions. An `approve + swap` batch is safer than two transactions in some respects, but it still requires careful target and amount selection.
 
@@ -1214,7 +1304,8 @@ A reference implementation SHOULD:
 - apply the same unlock-freeze, execution-active, and control-version checks to signed execution as to direct execution,
 - reset the execution nonce to `0` atomically with every control-version increment,
 - default to short deadlines (minutes) in wallet UIs for signed execution requests,
-- expose `executionNonceOf()` so relayers can query the current nonce before submission.
+- expose `executionNonceOf()` so relayers can query the current nonce before submission,
+- if execution hooks are implemented, version-scope them identically to validators, fire them per call within batches, pass the authorized caller (not the relayer) as the `caller` parameter, and bound the maximum number of active hooks.
 
 Implementations SHOULD verify root-controller signatures (for [ERC-1271](./eip-1271) and, if implemented, signed execution) by first attempting `ecrecover` against the controller address, then forwarding the digest to the controller's `isValidSignature` if it is an [ERC-1271](./eip-1271) contract, and finally delegating to active validators. If the root controller uses a scheme-agile transaction type rather than a contract-signature interface, or if recursive [ERC-7739](./eip-7739) wrapping would prevent contract-signature chaining, a validator MUST be installed for [ERC-1271](./eip-1271) and signed execution paths to function.
 
