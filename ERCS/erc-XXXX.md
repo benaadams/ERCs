@@ -255,9 +255,11 @@ Sponsored deployment is achieved by having the deployer (e.g. a paymaster, relay
 
 When account setup requires initialization (e.g. installing validators), the factory MUST support an atomic configured-deployment path. `deployAccountConfigured(initialOwner, initCalls)` and `deployAccountConfiguredWithSalt(initialOwner, salt, initCalls)` MUST, in a single atomic operation: deploy the account, validate the control-graph invariants, mint the controller token directly to `initialOwner`, and then execute `initCalls` as a batch on the newly deployed account under the recipient's control version. Because the token is minted to `initialOwner` before the initialization batch runs, all validators, recovery configuration, and other setup installed during `initCalls` are scoped to the recipient's control version and survive without a subsequent transfer.
 
+The configured-deployment functions (`deployAccountConfigured` and `deployAccountConfiguredWithSalt`) MUST be permissioned. The factory MUST restrict these functions to callers authorized by the factory operator. The unpermissioned `deployAccount` and `deployAccountWithSalt` functions remain open to any caller because they deploy bare accounts with no initialization and the recipient configures their own account post-deployment via `execute` or `executeBatch`. The distinction is security-critical: `initCalls` execute under the recipient's control version and can install validators, recovery state, approvals, or any other persistent configuration. An untrusted caller with access to the configured-deployment path could deploy an account to an unsuspecting recipient pre-seeded with backdoor validators or malicious recovery settings that persist as if the recipient had configured them. Permissioning ensures that only trusted deployers - the project's own relayer, a vetted onboarding contract, or an equivalent authorized caller - can use the configured-deployment path.
+
 The `initCalls` batch MUST be executed with the same authorization as if `initialOwner` had called `executeBatch` directly - the factory acts on behalf of the `initialOwner` for this one-time initialization only. If any call in `initCalls` fails, the entire deployment MUST revert.
 
-This enables preconfigured account packages: an organization or sponsor can deploy a fully configured account - with validators, child-account structure, protocol integrations, and app-specific approvals - and the recipient receives it ready to use with all configuration intact under their control version.
+This enables preconfigured account packages: an authorized deployer can deploy a fully configured account - with validators, child-account structure, protocol integrations, and app-specific approvals - and the recipient receives it ready to use with all configuration intact under their control version.
 
 ### Ownership/control linkage
 
@@ -533,11 +535,13 @@ interface IERCXXXXFactory {
         bytes32 salt
     ) external returns (uint256 tokenId, address account);
 
+    // Permissioned: MUST be restricted to callers authorized by the factory operator.
     function deployAccountConfigured(
         address initialOwner,
         Call[] calldata initCalls
     ) external returns (uint256 tokenId, address account);
 
+    // Permissioned: MUST be restricted to callers authorized by the factory operator.
     function deployAccountConfiguredWithSalt(
         address initialOwner,
         bytes32 salt,
@@ -968,6 +972,8 @@ Social recovery abuse remains possible. Guardians can collude, coerce, or exploi
 
 Because deployment is atomic (mint and `CREATE2` in one transaction), there is no window in which a controller token exists without a deployed account. Assets sent to an address before deployment land at a codeless address with no controller token; the deployer who later creates an account at that address receives those assets under their control. Users SHOULD NOT send assets to predicted addresses before deployment unless they trust the deployer.
 
+The configured-deployment path (`deployAccountConfigured`, `deployAccountConfiguredWithSalt`) is permissioned precisely because `initCalls` execute under the recipient's control version and can install arbitrary persistent state - validators, recovery guardians, token approvals, or child-account structures - that the recipient may not have requested or reviewed. An unpermissioned configured-deployment endpoint would allow an untrusted caller to deploy an account to any `initialOwner` pre-seeded with backdoor validators or malicious recovery configurations. The recipient would receive a controller NFT for an account that appears normal but contains attacker-installed delegation authority under the recipient's own control version. Permissioning collapses this trust boundary to the factory operator, which is already an implicit trust dependency since the factory deploys the account implementation code. The unpermissioned `deployAccount` and `deployAccountWithSalt` paths remain safe because they deploy bare accounts with no initialization; the recipient configures their own account post-deployment under their own authority.
+
 Privacy-pool withdrawal flows can leak information outside the privacy protocol. The controller token is public. The account address is public. Sponsorship, deployment timing, relayer identity, and downstream transfers MAY all create metadata links. This ERC does not confer privacy merely because it can participate in a privacy-protocol flow.
 
 ### Wallet and UX guidance
@@ -1016,6 +1022,7 @@ A reference implementation SHOULD:
 - increment control version on every successful transfer,
 - expose pure `accountOf` and `tokenIdOf` casts,
 - use `CREATE2` with immutable account implementation,
+- permission `deployAccountConfigured` and `deployAccountConfiguredWithSalt` to authorized callers only, keeping `deployAccount` and `deployAccountWithSalt` unpermissioned,
 - prefer immutable or minimally upgradeable account logic,
 - revert `setApprovalForAll` on the controller token,
 - expose `unlockDelayOf`, `pendingUnlockDelayOf`, and `unlockReadyAt` so wallets can surface pending unlock state and any pending meta-timelocked decrease of the unlock delay,
