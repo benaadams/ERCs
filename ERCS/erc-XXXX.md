@@ -337,6 +337,37 @@ If a frame reverts, the EVM automatically reverts that frame's transient-storage
 
 A user MUST be able to perform `approve + swap`, `approve + call`, `withdraw + settle + transfer`, or similar ordered actions as one ordinary transaction from the current NFT owner to `executeBatch`.
 
+#### Universal execution precondition
+
+This subsection generalizes the `execute` / `executeBatch` preconditions so they explicitly bind every execution path, not only those two named entry points. Where the rules here and the `execute` / `executeBatch` bullets overlap, they are equivalent; where they differ in scope, this subsection is controlling.
+
+An **execution path** on a compliant account is any code path whose execution issues a `CALL`, `CALLCODE`, `DELEGATECALL`, `CREATE`, or `CREATE2` opcode from the account itself or from a `DELEGATECALL`-imported module, when that opcode executes on behalf of the controller or on behalf of any authority that an extension introduces to authorize account-side execution. `STATICCALL` is NOT an execution path for this rule: because `STATICCALL` cannot modify state or move value, a compliant account MAY freely perform `STATICCALL` during a freeze window (for validation, signature verification, metadata lookup, `isValidatorActive` queries, or any other view-only purpose).
+
+On every execution path, a compliant account MUST, within the same execution frame as the issued opcode and before the opcode is reached, satisfy both of the following:
+
+- `locked(tokenId) == true` AND `unlockReadyAt(tokenId) == 0` on the controller token, and
+- the transient execution-active reference count discipline defined for `execute` above, including the prohibition on manual decrement along the revert path.
+
+A compliant account MUST NOT expose any execution path that can reach a state-modifying call without satisfying both conditions, and an implementation MUST NOT split execution across multiple frames, helper contracts, or `DELEGATECALL`-imported modules to avoid the check. The precondition MUST be evaluated in every frame whose logic issues a state-modifying call on behalf of the controller.
+
+This rule applies to, at minimum:
+
+- direct calls to `execute` or `executeBatch`,
+- any [ERC-4337](./eip-4337) `UserOperation` execution path that reaches a target call through `validateUserOp` and the EntryPoint,
+- any relayer-mediated, meta-transaction, or sponsored-execution path added by an extension,
+- any validator extension that authorizes account-side execution in addition to signature validation,
+- any implementation-defined alternative entry point (including custom session-key executors and bespoke batchers).
+
+The base ERC defines no delegated-execution authority; validators under this ERC are signature-validation delegates only (see the Validators section). Any extension that introduces an authority capable of authorizing account-side execution MUST make the precondition apply to that authority's paths as a condition of conformance with this ERC.
+
+**Validation and execution are distinct.** Validating an authorization object — for example, an [ERC-4337](./eip-4337) `UserOperation` or a signature passed to a validator — MAY occur while a pending or completed unlock exists. Validation MAY read state, and MAY perform conformant bookkeeping such as [ERC-4337](./eip-4337) nonce advancement or paymaster checks, because those steps do not themselves issue a state-modifying external call on behalf of the controller. The subsequent execution step that performs the target call MUST satisfy the precondition above, and a compliant account MUST NOT use the validation step as a back door by issuing the target call from inside `validateUserOp` or any equivalent pre-execution hook.
+
+**Receiver hooks are not execution paths.** `onERC721Received`, `onERC1155Received`, `onERC1155BatchReceived`, and `receive()` act on behalf of the incoming asset's sender, not on behalf of the controller, and a compliant account MUST continue to accept incoming transfers during the freeze window. A compliant account MUST NOT, however, use a receiver hook as an alternative execution entry point: any logic triggered by a receiver hook that would cause the account to issue a state-modifying call on behalf of the controller MUST satisfy the precondition before that call is issued.
+
+As a consequence, "execution is permitted on the controlled account" and "an unlock proposal exists for the controlling token" are mutually exclusive states on every path, and the controller token's transfer-time `isExecutionActive()` check reads the same reference count regardless of which entry point triggered execution.
+
+The simplest way to satisfy this rule is to route every execution path through the account's existing `execute` / `executeBatch` entry points. Implementations SHOULD prefer that structure.
+
 ### Nonce requirements and replay protection
 
 #### Direct ordinary transactions
@@ -349,7 +380,7 @@ If the current owner is a scheme-agile owner account under a model such as [EIP-
 
 #### ERC-4337 compatibility
 
-A compliant account MAY implement [ERC-4337](./eip-4337) for sponsored or relayed execution. If it does, authorization MUST be bound to the current control version so that a transfer of the controlling NFT invalidates any pending `UserOperation`s signed under the previous version. All other [ERC-4337](./eip-4337) semantics (nonces, EntryPoint, paymasters, bundler rules) are defined by [ERC-4337](./eip-4337) itself and are not redefined here.
+A compliant account MAY implement [ERC-4337](./eip-4337) for sponsored or relayed execution. If it does, authorization MUST be bound to the current control version so that a transfer of the controlling NFT invalidates any pending `UserOperation`s signed under the previous version. The `UserOperation` execution path MUST satisfy the Universal execution precondition defined in the Execution interface section. All other [ERC-4337](./eip-4337) semantics (nonces, EntryPoint, paymasters, bundler rules) are defined by [ERC-4337](./eip-4337) itself and are not redefined here.
 
 #### ERC-1271 message validation
 
@@ -468,6 +499,8 @@ The account standard only provides:
 - a stable account address,
 - root control via NFT ownership,
 - direct and batched execution.
+
+Any relayed, sponsored, or validator-mediated execution path used by this flow MUST satisfy the Universal execution precondition defined in the Execution interface section, like every other execution path on a compliant account.
 
 Privacy properties depend on the external privacy protocol and on operational details such as sponsorship, timing, ownership disclosure of the controlling NFT, and downstream transfers.
 
@@ -615,7 +648,7 @@ interface IERCXXXXValidator {
 }
 ```
 
-A compliant account SHOULD also implement [ERC-1271](./eip-1271) when off-chain signature verification is desired. Accounts that additionally implement [ERC-4337](./eip-4337) MAY extend the validator interface with `validateUserOp` or equivalent methods as needed.
+A compliant account SHOULD also implement [ERC-1271](./eip-1271) when off-chain signature verification is desired. Accounts that additionally implement [ERC-4337](./eip-4337) MAY extend the validator interface with `validateUserOp` or equivalent methods as needed; any such extension MUST uphold the Universal execution precondition defined in the Execution interface section on any path that reaches an external call, regardless of which authorization object triggered it.
 
 ### Events
 
@@ -969,7 +1002,7 @@ Implementations that support [ERC-6492](./eip-6492) SHOULD ensure the wrapper in
 
 Implementations that support [EIP-7702](./eip-7702)-aware or [EIP-8202](./eip-8202)-aware owners SHOULD document that those owner-account models affect the root controller's execution environment, while the custody wallet under this ERC remains the separate contract account. In particular, [EIP-7702](./eip-7702)-delegated EOAs should be described to users as programmable owner accounts, not as ordinary EOAs with unchanged trust assumptions.
 
-Implementations that additionally support [ERC-4337](./eip-4337) SHOULD bind `UserOperation` authorization to the current control version so that NFT transfers invalidate pending operations. When [ERC-4337](./eip-4337) account setup requires initialization, the deployer MAY atomically deploy with itself as `initialOwner`, perform setup via `execute` or `executeBatch`, and transfer the controlling NFT to the intended recipient, all within a single transaction.
+Implementations that additionally support [ERC-4337](./eip-4337) MUST enforce the Universal execution precondition on the `UserOperation` execution path and SHOULD bind `UserOperation` authorization to the current control version so that NFT transfers invalidate pending operations. The routing recommendation ("route every execution path through `execute` / `executeBatch`") stated in the Universal execution precondition applies here as the simplest way to satisfy the MUST. When [ERC-4337](./eip-4337) account setup requires initialization, the deployer MAY atomically deploy with itself as `initialOwner`, perform setup via `execute` or `executeBatch`, and transfer the controlling NFT to the intended recipient, all within a single transaction.
 
 ## Open Questions
 
