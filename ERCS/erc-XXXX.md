@@ -554,9 +554,9 @@ If an account supports execution hooks, the following requirements apply. Within
 
 Each hook installation MUST specify a scope that determines which execution paths trigger the hook:
 
-- **Direct** (`scope = 1`) — the hook fires only on direct owner execution (`execute`, `executeBatch`).
-- **Signed** (`scope = 2`) — the hook fires only on signed execution (`executeWithSignature`, `executeBatchWithSignature`), if implemented.
-- **All** (`scope = 3`) — the hook fires on both paths.
+- **Direct** (`scope = 1`) - the hook fires only on direct owner execution (`execute`, `executeBatch`).
+- **Signed** (`scope = 2`) - the hook fires only on signed execution (`executeWithSignature`, `executeBatchWithSignature`), if implemented.
+- **All** (`scope = 3`) - the hook fires on both paths.
 
 The scope distinction allows a controller to impose policy on delegated signers without constraining their own direct execution. For example, a controller MAY install a spending-limit hook scoped to signed execution so that session-key validators are rate-limited while the controller's own direct transactions are unrestricted.
 
@@ -1097,7 +1097,7 @@ This flow applies equally to key rotation, account sale, gift, or organizational
 4. Alice installs a different session-key validator on each child, authorizing a different automation agent (`H1`, `H2`, `H3`) to operate each child via signed execution.
 5. If `H2` is compromised, the attacker can only reach assets in `C2`. `C1` and `C3` are separate custody addresses with separate approval surfaces.
 6. Alice can revoke `H2`'s authority by calling `resetDelegations` on `C2`'s controller token, or sweep remaining assets from `C2` to `P` via `P`'s `executeBatch`.
-7. If Alice installs execution hooks scoped to signed execution on each child, the hooks enforce per-agent spending limits, approved-target whitelists, or rate limits — without constraining Alice's own direct execution through `P`.
+7. If Alice installs execution hooks scoped to signed execution on each child, the hooks enforce per-agent spending limits, approved-target whitelists, or rate limits - without constraining Alice's own direct execution through `P`.
 
 #### Escrowed control handoff
 
