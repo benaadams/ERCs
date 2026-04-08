@@ -1,27 +1,27 @@
 ---
 eip: XXXX
-title: NFT-Controlled Account Abstraction
-description: An NFT-controlled smart account using ERC-721 ownership for root control.
+title: Wallet Title Deeds
+description: ERC-721 title deeds of smart accounts - whoever holds the deed operates the account; transfer rotates control without moving assets or sharing keys.
 author: Ben Adams (@benaadams), Tim Seaward (@Drawaes), Artemis Black (@artblack7), Carlos Perez (@CPerezz), Giulio Rebuffo (@Giulio2002)
 discussions-to: https://ethereum-magicians.org/t/erc-XXXX-nft-controlled-account-abstraction/
 status: Draft
 type: Standards Track
 category: ERC
 created: 2026-04-02
-requires: 165, 712, 721, 1271, 4906, 5192, 5267, 7739
+requires: 165, 712, 721, 1155, 1271, 4906, 5192, 5267, 7739
 ---
 
 ## Abstract
 
-This ERC specifies an NFT-controlled smart account standard. The controlling NFT functions as a title instrument: its utility is the practical ability to operate the corresponding account, making it a transferable control credential rather than a collectible, membership, or claim.
+This ERC achieves account abstraction (AA) through NFT-controlled smart accounts. The controlling NFT functions as a title instrument: its utility is the practical ability to operate the corresponding account, making it a transferable control credential rather than a collectible, membership, or claim.
 
-It defines smart contract accounts whose root control is determined by ownership of a dedicated [ERC-721](./eip-721) token. For each compliant controlling token `tokenId`, the corresponding account address is `address(uint160(tokenId))`. 
+It defines smart contract accounts whose root control is determined by ownership of a dedicated [ERC-721](./eip-721) token. For each compliant controlling token `tokenId`, the corresponding account address is `address(uint160(tokenId))`.
 
 From a user perspective, the controller NFT functions as a transferable wallet. At the protocol level, the account contract remains the wallet and custody address, while the NFT is the root-control object.
 
 Ownership of the controlling NFT defines root control over the corresponding account. Transfer of the NFT rotates control to the new holder without moving assets held by the account and without the new holder needing access to the previous controller's keys. This enables full account transfer - including sale, gift, or organizational handoff - through a standard NFT transfer rather than through key sharing or signer-storage migration.
 
-As the account holds its assets directly, transferring the controlling NFT also transfers effective control of all assets in the account as a single atomic operation, rather than requiring individual transfers of each token, position, or balance. The account MAY hold ETH, [ERC-20](./eip-20), [ERC-721](./eip-721), [ERC-1155](./eip-1155), and other assets, and MUST support arbitrary execution and atomic batch execution.
+As the account holds its assets directly, transferring the controlling NFT transfers root execution authority over all assets in the account as a single atomic operation, rather than requiring individual transfers of each token, position, or balance. Token-level approvals ([ERC-20](./eip-20) `approve`, [ERC-721](./eip-721) `setApprovalForAll`, [ERC-1155](./eip-1155) operator approvals) that the account previously granted to third-party contracts survive the transfer and must be managed separately by the new controller. The account MAY hold ETH, [ERC-20](./eip-20), [ERC-721](./eip-721), [ERC-1155](./eip-1155), and other assets, and MUST support arbitrary execution and atomic batch execution.
 
 A single owner address MAY hold multiple controlling NFTs and therefore control multiple distinct NFT-controlled accounts. Because a compliant account MAY itself hold [ERC-721](./eip-721) assets, including controlling NFTs, an NFT-controlled account MAY itself control child NFT-controlled accounts. This permits hierarchical account trees.
 
@@ -37,15 +37,23 @@ This ERC separates control from custody. From a user perspective, holding the co
 
 ![Core architecture and control-vs-custody separation](../assets/erc-XXXX/control-architecture.svg)
 
-Control is not limited to one account. Any address MAY own multiple controller NFTs and therefore control multiple corresponding accounts. Because a compliant account MAY itself hold [ERC-721](./eip-721) tokens, including controller NFTs, one NFT-controlled account MAY itself become the controller of other NFT-controlled accounts. This enables nested account trees. Wallets and applications MAY present such hierarchies as folders, subaccounts, vaults, or another navigation metaphor, but this ERC standardizes only the control and execution semantics, not the UI metaphor.
+Control is not limited to one account. Any address MAY own multiple controller NFTs and therefore control multiple corresponding accounts. Because a compliant account MAY itself hold [ERC-721](./eip-721) tokens, including controller NFTs, one NFT-controlled account MAY itself become the controller of other NFT-controlled accounts. This enables nested account trees that naturally model corporate ownership structures: a corporate treasury or DAO controls subsidiary accounts for different operational functions, each with its own approval scope and risk profile, and transfer of a subsidiary's controller NFT to a new parent is a divestiture executed as a single NFT transfer while the subsidiary's assets, positions, and history remain intact. The same structure supports fund management: a parent account holds child-account controller NFTs representing different strategies or asset classes, and the entire fund can be transferred to a new manager through a single NFT transfer of the parent's controller token. Wallets and applications MAY present such hierarchies as folders, subaccounts, vaults, or another navigation metaphor, but this ERC standardizes only the control and execution semantics, not the UI metaphor.
 
 ![Hierarchical account tree and nesting](../assets/erc-XXXX/hierarchy-tree.svg)
 
 Multiple accounts under a single controller also provide approval-scoped risk isolation without requiring multiple keys. Because each account is a separate contract at a separate address, token-level approvals ([ERC-20](./eip-20) `approve`, [ERC-721](./eip-721) `setApprovalForAll`, [ERC-1155](./eip-1155) operator approvals) granted by one account do not affect any other account. A user MAY hold high-value assets in one account and interact with higher-risk protocols from a different account, both controlled by the same EOA or parent account. An unlimited approval granted to a compromised or malicious contract from the higher-risk account cannot reach assets held by the other. This is the same isolation that previously required managing separate seed phrases or hardware wallet slots for distinct EOAs, achieved here through separate custody addresses under unified root control.
 
+This also complements session-key schemes. Session keys limit what a delegated signer can do on a valuable account through permission scoping. Child accounts under this ERC limit what there is to lose: the user funds a purpose-specific child account with only the assets needed for the task. If the child is compromised, the loss is bounded by its balance rather than by the expressiveness of a permission policy. A delegated signer (hot key, agent, or session validator) is still needed on the child for unattended operation, but the blast radius of that delegation is hard-capped by the child's account boundary rather than relying solely on permission scoping to contain it.
+
+The combination of NFT ownership and delegated validators also supports organizational signing structures. An organization holds the controller NFT as root control but installs validators that authorize designated staff, departments, or external parties (such as a bank providing a credit facility) to sign transactions on the account - analogous to a corporate card where the company owns the account and employees can spend against it within policy limits. The organization can revoke any individual validator or call `resetDelegations(tokenId)` to invalidate all delegated authority at once, without transferring the NFT. Combined with child accounts, this extends to departmental budgets: a parent account controlled by the organization holds child-account controller NFTs, and each child is operated by a department head through a programmable parent that enforces spending limits and contract whitelists.
+
 ![Approval-scoped risk isolation across separate custody addresses](../assets/erc-XXXX/approval-risk-isolation.svg)
 
-The separation is intentional. Transfer of the NFT rotates root control without moving assets held by the account; and thus "key-rotation" of a smart-account occurs via simply transferring the NFT to a new owner. The recipient gains full control without ever knowing or sharing the previous owner's keys. This also enables account transfer as a first-class operation: an account with its full position history, token balances, protocol memberships, and address-based reputation can be sold, gifted, or handed off to a new controller through a single NFT transfer. Because assets remain at the account address, a single control rotation replaces what would otherwise require individual transfers of each balance and position, avoiding the gas cost, complexity, and failure risk of moving assets one by one.
+The separation is intentional. Transfer of the NFT rotates root control without moving assets held by the account; and thus "key-rotation" of a smart-account occurs via simply transferring the NFT to a new owner. The recipient gains full control without ever knowing or sharing the previous owner's keys. A user who wants to move from a hot wallet to a cold storage multisig, or from an EOA to a post-quantum signature scheme, transfers the NFT and is done - their Aave positions, Uniswap LP, Maker vault, ENS name, governance participation history, protocol allowlists, and every other address-based relationship remain at the same account address, now controlled by a different security model.
+
+This also enables account transfer as a first-class operation: an account with its full position history, token balances, protocol memberships, and address-based reputation can be sold, gifted, or handed off to a new controller through a single NFT transfer. For example, when a DAO votes to change its treasury management committee, the outgoing committee transfers the controller NFT to the new multisig - the treasury address, its protocol positions, its allowlists, and its on-chain reputation all persist, replacing what would otherwise require multi-transaction, multi-governance-vote asset migration and updating every protocol integration that references the old address. Because assets remain at the account address, a single control rotation replaces what would otherwise require individual transfers of each balance and position, avoiding the gas cost, complexity, and failure risk of moving assets one by one.
+
+The same mechanism supports digital inheritance: the controller NFT can be held by a dead man's switch contract or a multisig with designated heirs, so that a user's entire on-chain estate - assets, positions, memberships, and address-based identity - transfers to a successor through a single NFT transfer rather than requiring shared seed phrases or centralized custodians. More generally, because the controller NFT is a standard [ERC-721](./eip-721) token, it can be held by any contract - a vesting contract that releases control after a schedule completes, an escrow that releases on payment confirmation, or a governance contract that executes account operations only after a vote passes. A vesting position can also be sold by transferring the beneficiary's claim without the grantor releasing tokens early or sharing keys - the assets remain locked in the account while the right to eventually control them changes hands.
 
 ![Control transfer flow](../assets/erc-XXXX/control-transfer-flow.svg)
 
@@ -68,6 +76,8 @@ Alternative signing is addressed primarily at the root-controller layer rather t
 Validators remain useful, but for a narrower reason. They provide delegated signature validation for off-chain authorization flows and signer models that do not naturally map to an Ethereum address. [ERC-1271](./eip-1271) already permits arbitrary contract-side signature validation, including multisig and alternative signature schemes, and [ERC-7913](./eip-7913) is designed for signers that do not have their own Ethereum address.
 
 ## Specification
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "NOT RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in RFC 2119 and RFC 8174 when, and only when, they appear in all capitals, as shown here.
 
 ### Core invariant
 
@@ -100,11 +110,11 @@ For the purposes of this ERC:
 
 ### Token model
 
-The controlling token MUST be [ERC-721](./eip-721) compliant, MUST implement [EIP-165](./eip-165), and MUST implement [EIP-5192](./eip-5192). The controlling token MUST also implement the extension interface defined in this ERC.
+The controlling token MUST be [ERC-721](./eip-721) compliant, MUST implement [EIP-165](./eip-165), and MUST implement [EIP-5192](./eip-5192). The controlling token SHOULD implement [ERC-721](./eip-721) Enumerable (`totalSupply`, `tokenByIndex`, `tokenOfOwnerByIndex`). The controlling token MUST also implement the extension interface defined in this ERC.
 
 The root controller of the account encoded by `tokenId` MUST be `ownerOf(tokenId)` on the canonical controller token contract.
 
-Neither [ERC-721](./eip-721) single-token approval nor any attempted operator approval SHALL, by itself, grant account execution authority. An approved address is not a controller under this ERC.
+Neither [ERC-721](./eip-721) single-token approval nor any attempted operator approval MUST, by itself, grant account execution authority. An approved address is not a controller under this ERC.
 
 #### Transfer approval version
 
@@ -120,10 +130,7 @@ A compliant controller token MUST increment the transfer approval version:
 
 This ensures that all prior single-token transfer approvals are automatically invalidated whenever the lock state changes or the token transfers. An attacker who obtained an approval before the token was locked cannot use that stale approval to transfer the token when the owner later unlocks it. Invalidation is signalled by the existing `Transfer` event and the [EIP-5192](./eip-5192) `Locked` and `Unlocked` events respectively; no additional lock-status event is required.
 
-A compliant controller token MUST increment `controlVersionOf(tokenId)`:
-
-- when the token is minted, and
-- on every successful transfer that emits `Transfer`.
+A compliant controller token MUST initialize `controlVersionOf(tokenId)` to `1` on mint and MUST increment `controlVersionOf(tokenId)` on every successful transfer that emits `Transfer`.
 
 A compliant controller token MUST NOT allow burning of a controlling token.
 
@@ -133,9 +140,13 @@ A compliant controller token MUST NOT allow transfer to the zero address or to `
 
 #### Execution-active transfer guard
 
-Before completing any transfer, the controller token MUST check the `EXTCODEHASH` of `address(uint160(tokenId))`. If the hash is `keccak256("")` (existing account with no code) or `0x0` (non-existent account per [EIP-1052](./eip-1052)), the transfer MUST revert, because a transferable controller token with no corresponding runtime code is a fault state under this ERC's atomic deployment model. If the account has code deployed (i.e., `EXTCODEHASH` is neither `keccak256("")` nor `0x0`), the controller token MUST call `isExecutionActive()` on `address(uint160(tokenId))`. If `isExecutionActive()` returns `true`, the transfer MUST revert.
+Before completing any transfer, the controller token MUST verify that the corresponding account has deployed code and is not currently executing. If either check fails, the transfer MUST revert. A transfer of a controller token with no corresponding runtime code is a fault state under this ERC's atomic deployment model, and a transfer during active execution would allow mid-execution control rotation.
 
-This prevents mid-execution control rotation without requiring per-subcall cross-contract authorization re-checks. The account sets a transient execution-active flag via `TSTORE` at `execute` and `executeBatch` entry. The controller token reads it via `STATICCALL` only on transfer. The cost is borne by transfers (rare) rather than by subcalls (frequent).
+The controller token MUST call `isExecutionActive()` on `address(uint160(tokenId))`. If `isExecutionActive()` returns `true`, the transfer MUST revert.
+
+The RECOMMENDED mechanism for the code-presence check is `EXTCODEHASH`: revert if the hash is `keccak256("")` (existing account with no code) or `0x0` (non-existent account per [EIP-1052](./eip-1052)). Other mechanisms that reliably distinguish deployed accounts from codeless or non-existent addresses are compliant.
+
+This prevents mid-execution control rotation without requiring per-subcall cross-contract authorization re-checks. The account maintains an execution-active flag (RECOMMENDED: a reference count in transient storage via `TSTORE`) that is set during `execute` and `executeBatch`. The controller token reads it via `STATICCALL` only on transfer. The cost is borne by transfers (rare) rather than by subcalls (frequent).
 
 Wrapped, bridged, mirrored, fractionalized, or derivative representations of the controller token are not controllers under this ERC unless the derivative contract itself is the canonical controller token contract.
 
@@ -147,7 +158,7 @@ The controller token MUST use [EIP-5192](./eip-5192) as the canonical binary loc
 
 ![Transfer lock state machine](../assets/erc-XXXX/transfer-lock-state-machine.svg)
 
-The controller token MUST support a configurable `unlockDelay` for each token. `unlockDelayOf(tokenId)` returns the currently configured delay. The default or initial `unlockDelay` for any token that supports transfer MUST be greater than or equal to `1`, and `unlockDelayOf(tokenId)` for such a token MUST never be `0`; zero-delay unlocks are not a compliant transferable mode because they collapse the required separation between execution and transfer.
+The controller token MUST support a configurable `unlockDelay` for each token. `unlockDelayOf(tokenId)` returns the currently configured delay. The default or initial `unlockDelay` for any token that supports transfer MUST be `3600` (one hour). The owner MAY reduce `unlockDelay` to a floor of `1` via `setUnlockDelay`, subject to the asymmetric meta-timelock on decreases. `unlockDelayOf(tokenId)` MUST never be `0`; zero-delay unlocks are not a compliant transferable mode because they collapse the required separation between execution and transfer. The one-hour default ensures that counterparties, marketplaces, and off-chain monitoring systems have a meaningful window to observe account state before a transfer can complete. Owners who need faster transfers for programmatic use cases MAY reduce the delay, but the meta-timelock ensures any reduction is itself observable for the duration of the current delay.
 
 The risk is transaction ordering around sale or transfer of the controlling NFT. Without a real delay between "owner can still execute" and "NFT can be transferred," a seller can prepare a sale, then in the same block or immediately adjacent ordering window submit `execute` or `executeBatch` calls that drain assets before the buyer's transfer settles. Per-transaction guards do not solve this because the drain and the transfer can occur in different transactions. A strictly positive `unlockDelay` creates a visible freeze window: once the owner wants transferability, they must stop executing, wait through the delay, and only then complete the unlock. That delay is what gives counterparties, marketplaces, and off-chain systems a meaningful separation between sale preparation and custody handoff. If `unlockDelay == 0` were compliant, `proposeUnlock()` and `completeUnlock()` could be collapsed into an effectively immediate handoff, and the standard would no longer guarantee that separation.
 
@@ -184,15 +195,15 @@ By construction, "a marketplace approval is valid for transfer" and "the account
 
 #### Cycle detection on transfer
 
-A compliant controller token MUST perform a cycle check on every transfer (`transferFrom`, `safeTransferFrom`). The check MUST follow the controller-token ownership chain starting from the recipient and walk up to a maximum depth of 4 hops:
+A compliant controller token MUST perform a cycle check on every transfer (`transferFrom`, `safeTransferFrom`). The controller token MUST expose `maxNestingDepth()` returning the maximum supported hierarchy depth. A `maxNestingDepth` of `4` is a reasonable default for most deployments. The check MUST follow the controller-token ownership chain starting from the recipient and walk up to `maxNestingDepth()` hops:
 
 1. Let `current = recipient`.
 2. Compute `candidateTokenId = uint256(uint160(current))`. If a controller token with `candidateTokenId` does not exist (has not been minted), the chain has terminated at a non-controlled address (e.g. an EOA or an unrelated contract). This is the normal safe exit: no cycle is possible, and the transfer MUST proceed.
-3. If the controller token `candidateTokenId` exists, read `next = ownerOf(candidateTokenId)` with a bounded gas stipend (RECOMMENDED: 30,000 gas). If the call fails (reverts or runs out of gas), the transfer MUST revert, because the ownership chain cannot be verified.
+3. If the controller token `candidateTokenId` exists, read `next = ownerOf(candidateTokenId)` with a bounded gas stipend. The stipend MUST be sufficient for a single `ownerOf` lookup on the controller token (30,000 gas is a reasonable starting point under current gas schedules). If the call fails (reverts or runs out of gas), the transfer MUST revert, because the ownership chain cannot be verified.
 4. If `next == address(uint160(tokenId))` where `tokenId` is the token being transferred, a cycle would be created. The transfer MUST revert.
-5. Set `current = next` and repeat from step 2. If the depth exceeds 4 hops without terminating, the transfer MUST revert.
+5. Set `current = next` and repeat from step 2. If the depth exceeds `maxNestingDepth()` hops without terminating, the transfer MUST revert.
 
-This caps the maximum nesting depth of hierarchical account trees to 4 levels and guarantees exhaustive cycle prevention within that bound. Transfers to EOAs and non-controlled-account contracts terminate at step 2 on the first iteration with zero `ownerOf` calls. The gas cost of the check is bounded and predictable (at most 4 existence checks and 4 gas-capped ownership lookups per transfer).
+This caps the maximum nesting depth of hierarchical account trees and guarantees exhaustive cycle prevention within that bound. Transfers to EOAs and non-controlled-account contracts terminate at step 2 on the first iteration with zero `ownerOf` calls. The gas cost of the check is bounded and predictable (at most `maxNestingDepth()` existence checks and `maxNestingDepth()` gas-capped ownership lookups per transfer).
 
 ### tokenId/address derivation
 
@@ -234,14 +245,19 @@ The factory MUST, in a single atomic operation:
 1. compute the `CREATE2` salt from `msg.sender` and either the caller's current nonce or the caller-provided salt,
 2. deploy the account using `CREATE2`,
 3. derive `tokenId = uint256(uint160(deployedAccount))`,
-4. mint the controller token to the requested initial owner,
-5. emit `AccountDeployed`.
+4. validate that minting to `initialOwner` would not violate the control-graph invariants: `initialOwner` MUST NOT be `deployedAccount` (self-ownership), minting MUST NOT create a cycle in the ownership chain, and minting MUST NOT place the new token below a parent that is already at maximum nesting depth. The factory MUST enforce the same self-ownership, cycle-detection, and max-depth rules that the controller token enforces on transfer,
+5. mint the controller token to the requested initial owner,
+6. emit `AccountDeployed`.
 
-If `CREATE2` fails (e.g. code already exists at the target address), the entire transaction reverts and no controller token is minted.
+If `CREATE2` fails (e.g. code already exists at the target address), or if minting to `initialOwner` would create a control graph that transfer would reject, the entire transaction reverts and no controller token is minted.
 
 Sponsored deployment is achieved by having the deployer (e.g. a paymaster, relayer, or bundler) call `deployAccount` with the intended recipient as `initialOwner`. The deployer pays gas; the recipient receives the controlling NFT and full root control directly. Account sale and organizational handoff are achieved by the current controller transferring the controlling NFT after deployment.
 
-When account setup requires initialization (e.g. installing validators), the deployer MAY atomically deploy with itself as `initialOwner`, perform setup via `execute` or `executeBatch`, and transfer the controlling NFT to the intended recipient, all within a single transaction.
+When account setup requires initialization (e.g. installing validators), the factory MUST support an atomic configured-deployment path. `deployAccountConfigured(initialOwner, initCalls)` and `deployAccountConfiguredWithSalt(initialOwner, salt, initCalls)` MUST, in a single atomic operation: deploy the account, validate the control-graph invariants, mint the controller token directly to `initialOwner`, and then execute `initCalls` as a batch on the newly deployed account under the recipient's control version. Because the token is minted to `initialOwner` before the initialization batch runs, all validators, recovery configuration, and other setup installed during `initCalls` are scoped to the recipient's control version and survive without a subsequent transfer.
+
+The `initCalls` batch MUST be executed with the same authorization as if `initialOwner` had called `executeBatch` directly - the factory acts on behalf of the `initialOwner` for this one-time initialization only. If any call in `initCalls` fails, the entire deployment MUST revert.
+
+This enables preconfigured account packages: an organization or sponsor can deploy a fully configured account - with validators, child-account structure, protocol integrations, and app-specific approvals - and the recipient receives it ready to use with all configuration intact under their control version.
 
 ### Ownership/control linkage
 
@@ -284,7 +300,7 @@ This ERC therefore permits nested control relationships and account trees. It do
 
 Child accounts remain separate custody addresses with their own balances, validators, recovery settings, and execution history.
 
-Self-ownership is forbidden: a transfer to `address(uint160(tokenId))` MUST revert. Cyclic control graphs are prevented by the cycle check defined in the transfer section, which rejects any transfer that would create a cycle or exceed 4 levels of nesting.
+Self-ownership is forbidden: a transfer to `address(uint160(tokenId))` MUST revert. Cyclic control graphs are prevented by the cycle check defined in the transfer section, which rejects any transfer that would create a cycle or exceed `maxNestingDepth()` levels of nesting.
 
 ### Token receiver interfaces
 
@@ -303,33 +319,48 @@ A compliant account MUST implement arbitrary call execution and atomic batch exe
 
 - be callable by the current controller through an ordinary transaction,
 - revert unless `locked(tokenId)` on the controller token is `true` AND `unlockReadyAt(tokenId)` on the controller token is `0`,
-- increment the transient execution-active reference count (`TSTORE`) at entry,
+- ensure `isExecutionActive()` returns `true` for the duration of the call,
 - perform a single `CALL` to `target` with `value` and `data`,
-- decrement the transient execution-active reference count (`TSTORE`) on successful exit,
 - return the raw return data on success,
-- revert on failure,
 - bubble callee revert data exactly on failure.
 
 `executeBatch(calls)` MUST:
 
 - be callable by the current controller through an ordinary transaction,
 - revert unless `locked(tokenId)` on the controller token is `true` AND `unlockReadyAt(tokenId)` on the controller token is `0`,
-- increment the transient execution-active reference count (`TSTORE`) at batch entry,
-- decrement the transient execution-active reference count (`TSTORE`) on successful batch exit,
+- ensure `isExecutionActive()` returns `true` for the duration of the batch,
 - execute calls in order,
 - be atomic,
 - return ordered raw return data on success,
 - revert the entire batch if any call fails.
 
-The execution-active flag MUST be stored in transient storage using `TSTORE` at a fixed slot within the account contract as a reference count. On `execute` or `executeBatch` entry, the account MUST increment the count (`TSTORE(slot, TLOAD(slot) + 1)`). On successful exit, the account MUST decrement the count (`TSTORE(slot, TLOAD(slot) - 1)`).
+`isExecutionActive()` MUST return `true` whenever the account has an `execute`, `executeBatch`, or revocation call in progress, and `false` otherwise. The implementation MUST correctly handle nested and reentrant execution so that the flag remains active until all active frames have exited successfully or reverted.
+
+The RECOMMENDED implementation is a reference-counted flag in transient storage (`TSTORE`/`TLOAD`): increment on entry, decrement on successful exit, and rely on EVM revert semantics to roll back transient-storage writes on failure without an explicit decrement on the revert path. Other mechanisms that provide the same behavioral guarantee - `isExecutionActive()` returns `true` during execution, `false` otherwise, correctly across nesting and revert - are compliant.
 
 ![executeBatch approve plus swap sequence](../assets/erc-XXXX/execute-batch-approve-swap.svg)
-
-If a frame reverts, the EVM automatically reverts that frame's transient-storage writes; implementations MUST NOT perform an additional decrement on the revert path. `isExecutionActive()` MUST return `true` when the count is greater than `0`. This ensures nested or reentrant execution on the same account maintains the guard until all active frames have exited successfully or reverted.
 
 ![executeBatch position rebalance workflow](../assets/erc-XXXX/execute-batch-rebalance-workflow.svg)
 
 A user MUST be able to perform `approve + swap`, `approve + call`, `withdraw + settle + transfer`, or similar ordered actions as one ordinary transaction from the current NFT owner to `executeBatch`.
+
+### Approval revocation interface
+
+A compliant account MUST implement approval revocation functions that are callable by the current controller regardless of the unlock state. Unlike `execute` and `executeBatch`, these functions MUST NOT require `locked(tokenId) == true` or `unlockReadyAt(tokenId) == 0`. They are permitted during any unlock proposal state, including the fully unlocked transferable state.
+
+Each revocation function MUST make exactly one external call with hardcoded zero-approval calldata. The account MUST NOT allow the caller to supply arbitrary calldata, value, or approval amounts through these functions.
+
+`revokeERC20Approval(address token, address spender)` MUST call `token.approve(spender, 0)`.
+
+`revokeERC721Approval(address token, uint256 tokenId)` MUST call `token.approve(address(0), tokenId)`.
+
+`revokeOperatorApproval(address token, address operator)` MUST call `token.setApprovalForAll(operator, false)`. This works for both [ERC-721](./eip-721) and [ERC-1155](./eip-1155) operator approvals.
+
+`batchRevokeERC20Approvals(ERC20Revocation[] calldata)`, `batchRevokeERC721Approvals(ERC721Revocation[] calldata)`, and `batchRevokeOperatorApprovals(OperatorRevocation[] calldata)` MUST execute the corresponding revocations in order and revert the entire batch if any call fails.
+
+All revocation functions MUST increment the transient execution-active reference count on entry and decrement it on successful exit, identical to `execute` and `executeBatch`, so that the controller token's transfer guard covers revocation calls.
+
+All revocation functions MUST be callable only by the current `ownerOf(tokenId)`.
 
 ### Nonce requirements and replay protection
 
@@ -445,25 +476,11 @@ Social recovery under this ERC is root control rotation by NFT transfer. It does
 
 This ERC does not standardize privacy-pool circuits, note formats, nullifiers, relayer APIs, sponsor APIs, or anonymity sets.
 
-It MAY support the following use case when optional validator-mediated execution or [ERC-4337](./eip-4337) support is present:
+A compliant account MUST NOT require on-chain controller-token ownership disclosure as a precondition for receiving a withdrawal. The `deployAccountConfigured` path satisfies this: deployment, minting, and the withdrawal batch are atomic, so no account state is observable before the batch completes.
 
-1. a relayer or sponsor deploys account `A` via `deployAccount` with the user as `initialOwner`,
-2. the user possesses a valid withdrawal note or proof for an external privacy protocol,
-3. the relayer or sponsor submits a transaction that reaches `A` through the implementation's optional relayed-execution path,
-6. the batch MAY include:
-   - privacy-protocol withdrawal,
-   - sponsor settlement,
-   - token approval,
-   - downstream transfer,
-   - deposit into another protocol.
+A compliant account MAY be used in privacy-pool withdrawal flows. When so used, `executeBatch` MUST NOT special-case the call target or calldata, and MUST NOT emit account-level events beyond `BatchExecuted` for these operations.
 
-The account standard only provides:
-
-- a stable account address,
-- root control via NFT ownership,
-- direct and batched execution.
-
-Privacy properties depend on the external privacy protocol and on operational details such as sponsorship, timing, ownership disclosure of the controlling NFT, and downstream transfers.
+Privacy properties depend on the external privacy protocol and on operational details including sponsorship, timing, controller-token ownership visibility, and downstream transfer patterns.
 
 ### Contracts and interfaces
 
@@ -486,6 +503,7 @@ interface IERCXXXXControllerToken {
     function tokenIdOf(address account) external pure returns (uint256);
     function controlVersionOf(uint256 tokenId) external view returns (uint256);
     function factory() external view returns (address);
+    function maxNestingDepth() external view returns (uint256);
 
     function locked(uint256 tokenId) external view returns (bool);
     function unlockDelayOf(uint256 tokenId) external view returns (uint256);
@@ -513,6 +531,17 @@ interface IERCXXXXFactory {
     function deployAccountWithSalt(
         address initialOwner,
         bytes32 salt
+    ) external returns (uint256 tokenId, address account);
+
+    function deployAccountConfigured(
+        address initialOwner,
+        Call[] calldata initCalls
+    ) external returns (uint256 tokenId, address account);
+
+    function deployAccountConfiguredWithSalt(
+        address initialOwner,
+        bytes32 salt,
+        Call[] calldata initCalls
     ) external returns (uint256 tokenId, address account);
 
     function nonceOf(address deployer) external view returns (uint256);
@@ -557,6 +586,18 @@ interface IERCXXXXAccount {
     ) external payable returns (bytes[] memory results);
 
     function isExecutionActive() external view returns (bool);
+
+    // Approval revocation - callable during unlock freeze.
+    struct ERC20Revocation { address token; address spender; }
+    struct ERC721Revocation { address token; uint256 tokenId; }
+    struct OperatorRevocation { address token; address operator; }
+
+    function revokeERC20Approval(address token, address spender) external;
+    function revokeERC721Approval(address token, uint256 tokenId) external;
+    function revokeOperatorApproval(address token, address operator) external;
+    function batchRevokeERC20Approvals(ERC20Revocation[] calldata) external;
+    function batchRevokeERC721Approvals(ERC721Revocation[] calldata) external;
+    function batchRevokeOperatorApprovals(OperatorRevocation[] calldata) external;
 
     function installValidator(address validator, bytes calldata data) external;
     function uninstallValidator(address validator, bytes calldata data) external;
@@ -679,7 +720,6 @@ event UnlockDelayChangePending(
     uint256 newDelay,
     uint256 effectiveAt
 );
-
 ```
 
 Implementations SHOULD consider using [ERC-6093](./eip-6093)-style custom errors where appropriate, especially for controller-token operations that naturally map to standardized token failure modes such as invalid sender, invalid receiver, insufficient approval, or unauthorized transfer attempts. This ERC does not require [ERC-6093](./eip-6093) support, but aligning revert surfaces with that error vocabulary improves interoperability with tooling and integrators.
@@ -777,8 +817,9 @@ This flow applies equally to key rotation, account sale, gift, or organizational
 2. `P` acquires controlling tokens `T_C1` and `T_C2` for child accounts `C1` and `C2`.
 3. Because `ownerOf(T_C1) == P` and `ownerOf(T_C2) == P`, `P` is the root controller of both child accounts.
 4. Alice can cause `P` to execute calls to `C1` and `C2` under `P`'s control.
-5. A wallet might display `P` as a folder-like parent containing child accounts and their assets, but `C1` and `C2` remain separate custody addresses.
-6. The hierarchy MAY be extended further by having `C1` or `C2` own additional controlling NFTs for deeper descendants.
+5. Because `P` controls both child accounts, Alice can settle obligations across `C1` and `C2` atomically via `executeBatch` on `P` - netting positions, rebalancing assets, or sweeping funds between child accounts in a single transaction.
+6. A wallet might display `P` as a folder-like parent containing child accounts and their assets, but `C1` and `C2` remain separate custody addresses.
+7. The hierarchy MAY be extended further by having `C1` or `C2` own additional controlling NFTs for deeper descendants.
 
 #### Withdraw from a privacy pool with sponsored gas
 
@@ -790,23 +831,55 @@ This flow applies equally to key rotation, account sale, gift, or organizational
 
 ## Rationale
 
+### Design tradeoffs
+
 Compared with EOAs, this design is better at programmable execution, transfer-based control rotation without moving assets, and explicit separation of custody from root control. It is worse in simplicity and UX. Users will naturally experience the controller NFT as the wallet's transferable handle. The important distinction is that custody, balances, approvals, and execution history remain at the account address even though control moves via the NFT.
+
+### Relationship to ERC-173
+
+This design builds on [ERC-173](./eip-173): the account still resolves to a single owner address. The difference is that ownership is determined by an external [ERC-721](./eip-721) token rather than an internal storage slot. That indirection makes the ownership credential a transferable asset - holdable by a multisig, lockable in a vesting contract, nestable inside another controlled account - which a mutable storage slot cannot be.
+
+### Compared with conventional smart contract wallets
 
 Compared with conventional smart contract wallets, this design makes root control portable by moving an [ERC-721](./eip-721) token rather than by editing signer storage within the wallet. The new controller never needs access to the previous controller's keys, which makes account sale, gift, and organizational handoff possible without key sharing. Because the account holds its own assets, a single control rotation replaces what would otherwise require individual transfers of each asset. That is better when transferable control is a core feature. It is worse when the account should remain identity-bound rather than transfer-bound.
 
+[ERC-721](./eip-721) transfers are also a well-established interaction pattern with mature wallet UX: users already know how to send, receive, approve, and list NFTs, and wallets, marketplaces, and block explorers already surface these operations with clear confirmation flows. Signer-storage rotation in conventional smart contract wallets has no comparable standard UX - the operation varies per implementation, wallets do not present it consistently, and users have no transferable mental model for what "change the owner of a smart account" looks like. By encoding control rotation as an [ERC-721](./eip-721) transfer, this ERC inherits that existing UX surface rather than requiring each wallet to design a bespoke signer-management interface.
+
+### Compared with generic smart-account standards
+
 Compared with generic smart-account standards, this design imposes a specific root-control source. That is better when the system wants transferability and address-encoded discoverability. It is worse when applications want maximum freedom in choosing root authorization schemes or when transferability of root control is undesirable. The account MAY additionally implement [ERC-4337](./eip-4337) for sponsored or relayed execution, but this ERC does not require or redefine it.
+
+### Composable execution via ERC-8211
+
+This ERC's `executeBatch` is a static batch: every target, value, and calldata byte must be known when the owner signs the transaction. [ERC-8211](./eip-8211) ("Smart Batching") extends this with `executeComposable`, where parameters can be resolved from live on-chain state at execution time and validated against inline constraints before each call proceeds. This is useful for multi-step DeFi flows where intermediate values depend on pool state (e.g. swap-then-deposit where the deposit amount depends on swap output). [ERC-8211](./eip-8211) is compatible with this ERC's security model: the same `msg.sender == ownerOf(tokenId)` authorization, the same execution-active transient guard, and the same unlock-freeze rules apply. An account MAY support [ERC-8211](./eip-8211) either as a native method alongside `execute` and `executeBatch`, or as an [ERC-7579](./eip-7579) executor module. The resolution and constraint semantics are defined by [ERC-8211](./eip-8211) and are not redefined here.
+
+### Relationship to EIP-8141 and public mempool compatibility
 
 Relative to [EIP-8141](./eip-8141), this ERC deliberately keeps its baseline execution path on top of ordinary transaction validity. [EIP-8141](./eip-8141) moves authorization into a programmable validation prefix and requires public mempool nodes to simulate that prefix until `payer_approved = true`, under gas, opcode, and state-access rules. The "Mempool Strategies for EIP-8141" note[^2] and "Frame Transactions Through a Statelessness Lens"[^1] explain that this can shift mempool validation from a simple sender-account lookup to executing verification code and depending on additional validation-critical state.
 
 That is the sense in which this ERC is more compatible with VOPS[^3] than [EIP-8141](./eip-8141): the direct-owner path keeps the public-mempool object as a regular transaction, so a node that maintains account data for local transaction validity can still track, propagate, and inclusion-list those transactions under [EIP-7805](./eip-7805). The claim is limited. It does not mean every sponsored or validator-mediated flow under this ERC automatically receives the same property, and it does not mean every [EIP-8141](./eip-8141) sender mode is equally expensive. It means the baseline path of this ERC does not require a new mempool-side EVM validation model.
 
+### Operational NFT
+
 Compared with NFTs that represent claims, metadata, or social meaning only, this ERC makes the NFT operational. The NFT is the root control object for a separate contract wallet that actually holds assets.
 
-The standard deliberately allows one controller to own multiple controller NFTs, and it allows compliant accounts themselves to own controller NFTs. That makes compositional hierarchies possible: a parent account can own child account controllers while also holding regular assets, and child accounts can in turn own deeper descendants. The benefit is explicit folder-like structuring without merging custody addresses, and approval-scoped risk isolation: because each account is a separate custody address, token approvals granted by one account cannot reach assets held by another, even though both are controlled by the same key. This is the same isolation that previously required separate EOAs with separate keys. Self-ownership is prohibited and cyclic graphs are prevented by an on-transfer check that walks the ownership chain up to 4 hops, capping maximum nesting depth.
+### Hierarchical accounts and on-chain discovery
+
+The standard deliberately allows one controller to own multiple controller NFTs, and it allows compliant accounts themselves to own controller NFTs. That makes compositional hierarchies possible: a parent account can own child account controllers while also holding regular assets, and child accounts can in turn own deeper descendants. The benefit is explicit folder-like structuring without merging custody addresses, and approval-scoped risk isolation: because each account is a separate custody address, token approvals granted by one account cannot reach assets held by another, even though both are controlled by the same key. This is the same isolation that previously required separate EOAs with separate keys. Self-ownership is prohibited and cyclic graphs are prevented by an on-transfer check that walks the ownership chain up to `maxNestingDepth()` hops, capping maximum nesting depth. The default of 4 is justified by gas cost (4 hops × ~30,000 gas stipend = ~120,000 gas worst case on transfer, which is acceptable for a rare operation) and practical organizational depth (parent → subsidiary → department → project covers most real-world hierarchies). Implementations that need deeper trees MAY increase `maxNestingDepth()`; the view is exposed so that wallets and tooling can discover the supported depth before users attempt to build deeper structures.
+
+[ERC-721](./eip-721) Enumerable is recommended on the controller token because an address that controls multiple accounts needs to discover which accounts it controls, and wallets rendering hierarchical account trees need to enumerate children. Without Enumerable, this discovery requires off-chain event indexing. Unlike most NFT collections where enumeration is a convenience, controller tokens represent active account-control relationships, making on-chain discoverability directly useful for wallets, block explorers, and organizational tooling.
+
+### Alternative signing and validators
 
 Alternative signing is positioned primarily at the owner-account layer. [EIP-8202](./eip-8202) proposes scheme-agile owner transactions with explicit `scheme_id`; this makes alternative root signing a natural consequence of transferring the NFT to an owner account that uses the desired scheme. That is cleaner than forcing the NFT-controlled account itself to standardize every signing curve as root control logic. Validators remain useful, but mainly for delegated signature-validation flows and for signers that do not map naturally to an address, as contemplated by [ERC-7913](./eip-7913).
 
+### Recovery
+
 Recovery is defined as NFT transfer because anything else would blur the distinction between NFT ownership, account control, and execution authorization. That distinction is the core of the standard.
+
+### Approval revocation during transfer freeze
+
+The approval revocation interface exists because the execution freeze and the need for pre-transfer cleanup are in tension. The freeze from `proposeUnlock()` onwards prevents sell-and-drain attacks by making "execution allowed" and "marketplace approval valid for transfer" mutually exclusive. But it also prevents the seller from revoking the account's outstanding token-level approvals during the transfer-preparation window - exactly when cleanup is most useful. Revoking an approval (setting it to zero) is always safe from the buyer's perspective: it removes a drain vector, it cannot create one. Because each revocation function makes exactly one external call with hardcoded zero-value calldata, the revocation interface cannot be used as a general execution path. The account cannot grant new approvals, transfer assets, or perform arbitrary calls through the revocation functions. This allows a practical marketplace flow: the seller proposes unlock, batch-revokes outstanding approvals during the freeze, and the buyer receives a cleaner account - without reopening the drain window that the freeze was designed to close.
 
 ### Relationship to ERC-6551
 
@@ -821,7 +894,9 @@ Recovery is defined as NFT transfer because anything else would blur the distinc
 
 This is therefore not just a constrained [ERC-6551](./eip-6551) profile. The novelty here is the canonical one-token/one-account mapping plus standardized transfer-aware control semantics.
 
-Migration is not automatic. A [ERC-6551](./eip-6551) account does not become compliant with this ERC without redeployment, because the derivation rules and control model differ. However, a [ERC-6551](./eip-6551) account MAY hold a controller NFT under this ERC and act as the owner.
+Unlike [ERC-6551](./eip-6551), this ERC has no central registry. The standard defines interfaces and invariants, not a singleton deployment. Multiple independent compliant controller-token and factory implementations MAY coexist; the `tokenId == uint256(uint160(account))` derivation is computable by anyone without querying a shared contract. The ecosystem decides which implementations to adopt based on audit quality, feature set, and trust, the same way multiple [ERC-20](./eip-20) or [ERC-721](./eip-721) implementations coexist. No single contract is a systemic dependency of the standard.
+
+Migration is not automatic. An [ERC-6551](./eip-6551) account does not become compliant with this ERC without redeployment, because the derivation rules and control model differ. However, an [ERC-6551](./eip-6551) account MAY hold a controller NFT under this ERC and act as the owner.
 
 ## Backwards Compatibility
 
@@ -842,6 +917,20 @@ Cross-chain control is out of scope for this ERC. User-salt stabilizes deploymen
 Theft of the controlling NFT is account takeover. The controller token MUST be treated as a root credential.
 
 Risk isolation between multiple accounts under a single controller does not protect against compromise or loss of the controller itself. If the EOA or owner account holding the controller NFTs is compromised, the attacker gains root control over every account whose controller token that address holds. If the owner's keys are lost and no recovery mechanism has been configured, all controlled accounts become permanently inaccessible. The approval-scoped isolation described in this ERC protects accounts from each other's token-level approvals - it does not protect them from a shared root-control failure. Users who require stronger isolation at the root-control layer SHOULD hold controller tokens in separate owner accounts, use a multisig or threshold scheme as the owner, or configure social recovery before it is needed.
+
+### EIP-7702 delegation risk
+
+[EIP-7702](./eip-7702) delegation applies generally to any EOA; for threat-model purposes, a 7702-delegated EOA SHOULD be treated as a mutable contract owner rather than a plain key-held EOA. The following risks are specific to NFT-controlled accounts under this ERC:
+
+**No control-version increment on delegation change.** `controlVersionOf(tokenId)` does not change when the owner's 7702 delegation changes. Validators installed by malicious delegated code remain active until `resetDelegations(tokenId)` is explicitly called. Unlike a controller-NFT transfer, which automatically invalidates all delegated authority, a delegation change is invisible to the controlled account's authorization model.
+
+**Persistent backdoors specific to this ERC.** Malicious delegated code can install validators (which persist because the control version does not change), initiate a pending `setUnlockDelay` reduction to the minimum (subject to the meta-timelock), and grant token approvals from the controlled account. Revoking the 7702 delegation does not undo any of these. Users recovering from an unwanted delegation SHOULD treat revocation as only the first step; they SHOULD also call `resetDelegations(tokenId)`, revoke standing approvals via the revocation interface, verify the configured `unlockDelay`, and cancel any pending unlock-delay decrease.
+
+**Correlated multi-account compromise.** This ERC makes it natural for one EOA to hold multiple controller NFTs. A single delegation compromise exposes every controlled account simultaneously. The approval-scoped isolation between accounts does not protect against a shared root-control failure at the owner level.
+
+**Transfer lock protects the NFT but not the assets.** The unlock delay prevents atomic NFT theft, and execution is frozen from `proposeUnlock()` onwards. But delegated code can drain assets via `execute()` and `executeBatch()` while the token is in the normal locked state without touching the transfer lock at all.
+
+Security-sensitive implementations MAY choose stricter owner-environment policies. For example, an implementation MAY reject execution when `ownerOf(tokenId)` is a 7702-delegated EOA (detectable via `EXTCODESIZE == 23`), or MAY pin an expected `EXTCODEHASH` for the owner at the current control version and reject execution when it changes unexpectedly. For high-value accounts, a contract owner (multisig, Safe, or purpose-built controller) is materially safer than a raw EOA, because contract accounts cannot be 7702-delegated.
 
 The transfer lock mechanism mitigates accidental or unauthorized control rotation. Because controller tokens are minted locked, require an explicit `proposeUnlock` plus `completeUnlock` flow before they become transferable, and immediately re-lock on transfer, [ERC-721](./eip-721) single-token approvals cannot by themselves trigger a transfer, and `setApprovalForAll` is forbidden. The transfer approval version is incremented on every `proposeUnlock`, `lock`, and successful transfer, which automatically invalidates all prior single-token approvals. This eliminates the risk of stale approvals becoming active when the owner prepares the token for transfer: any approval granted before the unlock proposal is no longer recognized. The owner must explicitly re-approve after initiating unlock if delegated transfer is desired.
 
@@ -887,11 +976,11 @@ Wallet UX hazards are unusually severe because control and custody are separate.
 
 Wallets and other implementers SHOULD surface the distinction between owning a child account's controlling NFT and directly holding the child account's assets. Nested accounts can be presented as folders, subaccounts, or similar hierarchy, but the child accounts remain separate custody addresses with separate balances, validators, recovery settings, and execution history.
 
-Outstanding token-level approvals survive control transfer. [ERC-20](./eip-20) allowances, [ERC-721](./eip-721) approvals and operators, and [ERC-1155](./eip-1155) operator approvals granted by the account to third-party contracts are stored on the individual token contracts and are not invalidated when the controlling NFT transfers. A previous controller who granted unlimited approvals to a DeFi protocol has effectively granted those approvals to the protocol forever, unless the new controller explicitly revokes them. [ERC-1271](./eip-1271) signatures are invalidated by the control-version increment, but token-level approvals are not. Wallets SHOULD enumerate and display outstanding approvals during or after control transfer and SHOULD offer batch revocation via `executeBatch`. The risk is highest when accounts are sold or transferred to untrusted parties, as the new controller may not be aware of all existing approvals.
+Outstanding token-level approvals survive control transfer. [ERC-20](./eip-20) allowances, [ERC-721](./eip-721) approvals and operators, and [ERC-1155](./eip-1155) operator approvals granted by the account to third-party contracts are stored on the individual token contracts and are not invalidated when the controlling NFT transfers. A previous controller who granted unlimited approvals to a DeFi protocol has effectively granted those approvals to the protocol forever, unless the new controller explicitly revokes them. [ERC-1271](./eip-1271) signatures are invalidated by the control-version increment, but token-level approvals are not. The approval revocation interface (`revokeERC20Approval`, `revokeERC721Approval`, `revokeOperatorApproval` and batch variants) allows the current controller to revoke known approvals even during the unlock freeze, providing a cleanup path before transfer. However, the account cannot automatically enumerate which approvals it has granted - approvals are stored on external token contracts and there is no on-chain enumeration mechanism. Approval events (`Approval`, `ApprovalForAll`) are indexed by block explorers and off-chain services, so outstanding approvals are discoverable through off-chain tooling, but this requires active due diligence. Wallets and marketplaces SHOULD surface outstanding approvals for the account address during or before control transfer. The risk is highest when accounts are sold or transferred to untrusted parties, as the new controller may not be aware of all existing approvals.
 
 Users SHOULD prefer exact-amount approvals combined with their target operation in a single `executeBatch` (for example `approve + swap`) rather than granting unlimited standing approvals, as this limits the exposure window.
 
-Self-ownership is prohibited at the protocol level: transfers to the account encoded by the tokenId always revert. Cyclic control graphs are prevented by the cycle check on every transfer, which walks the ownership chain up to 4 hops. The check distinguishes between addresses that are not controlled accounts (no minted controller token - safe, chain terminates) and addresses that are controlled accounts whose ownership chain must be followed. Transfers to EOAs and non-controlled-account contracts incur no `ownerOf` calls. Only transfers into the controlled-account hierarchy trigger the bounded chain walk.
+Self-ownership is prohibited at the protocol level: transfers to the account encoded by the tokenId always revert. Cyclic control graphs are prevented by the cycle check on every transfer, which walks the ownership chain up to `maxNestingDepth()` hops (default 4). The check distinguishes between addresses that are not controlled accounts (no minted controller token - safe, chain terminates) and addresses that are controlled accounts whose ownership chain must be followed. Transfers to EOAs and non-controlled-account contracts incur no `ownerOf` calls. Only transfers into the controlled-account hierarchy trigger the bounded chain walk.
 
 ### Regulatory considerations
 
@@ -948,18 +1037,9 @@ Implementations that support [ERC-1271](./eip-1271) SHOULD verify root-controlle
 
 Implementations that support [ERC-6492](./eip-6492) SHOULD ensure the wrapper invokes the factory's `deployAccount` with the intended `initialOwner`.
 
-Implementations that support [EIP-7702](./eip-7702)-aware or [EIP-8202](./eip-8202)-aware owners SHOULD document that those owner-account models affect only how the owner originates transactions. The custody wallet under this ERC remains the separate contract account.
+Implementations that support [EIP-7702](./eip-7702)-aware or [EIP-8202](./eip-8202)-aware owners SHOULD document that those owner-account models affect the root controller's execution environment, while the custody wallet under this ERC remains the separate contract account. In particular, [EIP-7702](./eip-7702)-delegated EOAs SHOULD be described to users as programmable owner accounts, not as ordinary EOAs with unchanged trust assumptions.
 
 Implementations that additionally support [ERC-4337](./eip-4337) SHOULD bind `UserOperation` authorization to the current control version so that NFT transfers invalidate pending operations. When [ERC-4337](./eip-4337) account setup requires initialization, the deployer MAY atomically deploy with itself as `initialOwner`, perform setup via `execute` or `executeBatch`, and transfer the controlling NFT to the intended recipient, all within a single transaction.
-
-## Open Questions
-
-- Should [ERC-6492](./eip-6492) support be recommended normative behavior?
-- Should a companion ERC define a standard social-recovery interface that preserves the NFT-ownership invariant?
-- Should validator capability discovery be standardized?
-- Should a future companion ERC define session validators and spending-limit validators for this account type?
-- Should [EIP-8202](./eip-8202) draft eventually become an explicit optional dependency once stabilized?
-- Should a companion view or indexing standard describe parent / child discovery for wallet folder UIs and nested-account explorers?
 
 [^1]: Carlos Perez, "Frame Transactions Through a Statelessness Lens," *Ethereum Research* (Execution Layer Research), March 29, 2026.
 
