@@ -27,7 +27,9 @@ The resulting account-abstraction properties, achieved using existing standards 
 - **VOPS statelessness** - no account-specific state required for mempool validation; nodes validate by sender or relayer nonce and balance only.
 - **Privacy-pool withdrawal** - atomic deployment and sponsored execution without prior on-chain ownership disclosure.
 
-Because the control object is a standard [ERC-721](./eip-721) token and the account is a separate smart contract, the design also enables capabilities beyond the conventional AA scope: transferable account sale and organizational handoff as a single NFT transfer; hierarchical account trees for corporate, fund, and departmental structures; approval-scoped risk isolation across accounts under unified control; digital inheritance through dead-man's-switch or multisig holders; escrow and vesting without custodians; and account-level collateralization where a lending protocol can assess and liquidate an entire account rather than individual tokens.
+As the control object is a standard [ERC-721](./eip-721) token while the account is a separate smart contract, the design enables capabilities beyond conventional AA.
+
+These include transferable account sales and organisational handoffs through a single NFT transfer, hierarchical account trees for corporate, fund, and departmental structures, approval-scoped risk isolation across accounts under unified control, digital inheritance via a dead-man's switch or multisig holders, escrow and vesting without custodians, and account-level collateralisation where a lending protocol can assess and liquidate an entire account rather than individual tokens.
 
 It defines smart contract accounts whose root control is determined by ownership of a dedicated [ERC-721](./eip-721) token. For each compliant controlling token `tokenId`, the corresponding account address is `address(uint160(tokenId))`.
 
