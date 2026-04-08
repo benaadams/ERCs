@@ -1069,6 +1069,37 @@ This flow applies equally to key rotation, account sale, gift, or organizational
 4. The batch includes the withdrawal call, settlement, and any downstream transfer.
 5. Privacy depends on the privacy protocol and operational context, not on this ERC alone.
 
+#### Divestiture of a subsidiary account
+
+1. Organization `Org` controls parent account `P` through controller token `T_P`.
+2. `P` holds controller tokens `T_S1`, `T_S2`, `T_S3` for subsidiary accounts `S1`, `S2`, `S3`.
+3. `Org` decides to divest `S2`. `S2` holds its own assets, protocol positions, ENS name, and approval history at its own address.
+4. `Org` causes `P` to propose unlock on `T_S2`, waits through the delay, completes the unlock, and transfers `T_S2` to the acquiring entity's multisig `M`.
+5. `ownerOf(T_S2)` becomes `M`. `S2`'s address, assets, positions, allowlists, and on-chain history are unchanged.
+6. `Org` retains control of `P`, `S1`, and `S3`. The acquiring entity operates `S2` independently.
+7. The divestiture is a single NFT transfer. No multi-transaction asset migration, no protocol-by-protocol address updates.
+
+#### Strategy compartments for automated agents
+
+1. Alice controls parent account `P` through controller token `T_P`.
+2. Alice deploys three child accounts `C1`, `C2`, `C3` via the factory. `P` holds their controller NFTs.
+3. Alice funds each child with a limited budget: `C1` for yield farming, `C2` for DEX arbitrage, `C3` for governance voting.
+4. Alice installs a different session-key validator on each child, authorizing a different automation agent (`H1`, `H2`, `H3`) to operate each child via signed execution.
+5. If `H2` is compromised, the attacker can only reach assets in `C2`. `C1` and `C3` are separate custody addresses with separate approval surfaces.
+6. Alice can revoke `H2`'s authority by calling `resetDelegations` on `C2`'s controller token, or sweep remaining assets from `C2` to `P` via `P`'s `executeBatch`.
+7. If Alice installs execution hooks scoped to signed execution on each child, the hooks enforce per-agent spending limits, approved-target whitelists, or rate limits — without constraining Alice's own direct execution through `P`.
+
+#### Escrowed control handoff
+
+1. Alice controls account `A` through controller token `T`.
+2. Alice and Bob agree to a sale of account `A` for a fixed price, mediated by escrow contract `E`.
+3. Alice proposes unlock on `T`, waits through the delay, completes the unlock, and transfers `T` to `E`. Execution on `A` is frozen during the unlock window.
+4. `E` holds `T`. Neither Alice nor Bob can execute on `A` while `E` holds the NFT (only `ownerOf(T)` can execute, and `E` is a contract with no execute path on `A`).
+5. Bob sends payment to `E`. `E` verifies receipt and transfers `T` to Bob.
+6. Bob now controls `A` with all its assets, positions, and address-based relationships intact.
+7. If Bob fails to pay within a deadline, `E` returns `T` to Alice.
+8. The same pattern applies to court-ordered asset freezes (a court-appointed contract holds `T`), vesting (a vesting contract releases `T` on schedule), and settlement workflows.
+
 ## Rationale
 
 ### Design tradeoffs
