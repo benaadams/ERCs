@@ -27,9 +27,11 @@ A single owner address MAY hold multiple controlling NFTs and therefore control 
 
 This ERC does not standardize any wallet UI or "folder" semantics for such hierarchies.
 
-This ERC also defines deterministic deployment semantics, transfer-aware authorization invalidation through a token-side control version, compatibility with [ERC-1271](./eip-1271), and an optional validator mechanism for delegated signature validation. The proposal is intended to deliver smart-account functionality including batching, programmable execution, and alternative root-controller account models using existing standards rather than new consensus changes. [EIP-7702](./eip-7702) provides an EOA-code path, and [EIP-8202](./eip-8202) proposes scheme-agile transactions for EOAs - enabling post-quantum key migration by transferring the controlling NFT to an owner account that uses a post-quantum signature scheme. The account MAY additionally implement [ERC-4337](./eip-4337) for sponsored or relayed execution.
+This ERC also defines deterministic deployment semantics, transfer-aware authorization invalidation through a token-side control version, compatibility with [ERC-1271](./eip-1271), and an optional validator mechanism for delegated signature validation. The proposal is intended to deliver smart-account functionality including batching, programmable execution, and alternative root-controller account models using existing standards rather than new consensus changes. [EIP-7702](./eip-7702) provides an EOA-code path, and [EIP-8202](./eip-8202) proposes scheme-agile transactions for EOAs - enabling post-quantum key migration by transferring the controlling NFT to an owner account that uses a post-quantum signature scheme.
 
-As direct owner execution remains an ordinary execution-payload transaction, that path is also compatible with public-mempool inclusion mechanisms such as [EIP-7805](./eip-7805) and aligns with the local-validation goals described in "Validity-Only Partial Statelessness" (VOPS)[^3]. This does not automatically extend to individual [ERC-4337](./eip-4337) `UserOperation`s, which remain off-protocol mempool objects.
+This ERC also defines an optional signed execution path: the controller signs an [EIP-712](./eip-712) execution request and any third party submits it as an ordinary transaction, paying gas on the controller's behalf. This provides gas-sponsored and relayed execution without requiring [ERC-4337](./eip-4337) infrastructure, an EntryPoint singleton, a bundler network, or a paymaster protocol. The account MAY additionally implement [ERC-4337](./eip-4337) for integration with the bundler marketplace, paymaster ecosystem, and [ERC-4337](./eip-4337) tooling when those additional capabilities are desired.
+
+As direct owner execution remains an ordinary execution-payload transaction, that path is compatible with public-mempool inclusion mechanisms such as [EIP-7805](./eip-7805) and aligns with the local-validation goals described in "Validity-Only Partial Statelessness" (VOPS)[^3]. When signed execution is implemented, it preserves this property: the relayer's transaction is also an ordinary execution-payload transaction. This does not automatically extend to individual [ERC-4337](./eip-4337) `UserOperation`s, which remain off-protocol mempool objects.
 
 ## Motivation
 
@@ -46,6 +48,10 @@ Multiple accounts under a single controller also provide approval-scoped risk is
 This also complements session-key schemes. Session keys limit what a delegated signer can do on a valuable account through permission scoping. Child accounts under this ERC limit what there is to lose: the user funds a purpose-specific child account with only the assets needed for the task. If the child is compromised, the loss is bounded by its balance rather than by the expressiveness of a permission policy. A delegated signer (hot key, agent, or session validator) is still needed on the child for unattended operation, but the blast radius of that delegation is hard-capped by the child's account boundary rather than relying solely on permission scoping to contain it.
 
 The combination of NFT ownership and delegated validators also supports organizational signing structures. An organization holds the controller NFT as root control but installs validators that authorize designated staff, departments, or external parties (such as a bank providing a credit facility) to sign transactions on the account - analogous to a corporate card where the company owns the account and employees can spend against it within policy limits. The organization can revoke any individual validator or call `resetDelegations(tokenId)` to invalidate all delegated authority at once, without transferring the NFT. Combined with child accounts, this extends to departmental budgets: a parent account controlled by the organization holds child-account controller NFTs, and each child is operated by a department head through a programmable parent that enforces spending limits and contract whitelists.
+
+Gas sponsorship is addressed through an optional signed execution path rather than deferring entirely to external infrastructure. This ERC defines signed execution: the controller signs an [EIP-712](./eip-712) execution request offline, and any third party submits the signed request as an ordinary transaction. The submitter pays gas; the controller never sends a transaction. This provides relayed and sponsored execution without requiring an [ERC-4337](./eip-4337) EntryPoint, bundler network, or paymaster protocol. Any address with sufficient ETH for gas can act as a relayer - a friend, a dapp backend, a purpose-built sponsor, or an automated service. Because the relayer submits an ordinary transaction, the signed execution path preserves the same public-mempool and [EIP-7805](./eip-7805) FOCIL compatibility as direct owner execution: the relayer's transaction is a regular protocol transaction that nodes can track, propagate, and inclusion-list without account-specific mempool validation logic. An account MAY additionally implement [ERC-4337](./eip-4337) for integration with the bundler marketplace, paymaster ecosystem, and [ERC-4337](./eip-4337) tooling when those additional capabilities are desired, but [ERC-4337](./eip-4337) is not required for gas sponsorship.
+
+When implemented, the signed execution path also provides a standardized execution entrypoint for delegated signers. A session-key validator can authorize signed execution natively: the session key signs an execution request, a relayer or the session key holder submits it, the account's signature validation cascade reaches the session-key validator, and execution proceeds. This makes validator-driven execution a first-class capability without requiring [ERC-4337](./eip-4337) or a non-standard execution interface for every delegated-signer use case.
 
 ![Approval-scoped risk isolation across separate custody addresses](../assets/erc-XXXX/approval-risk-isolation.svg)
 
@@ -67,7 +73,7 @@ Compatibility with public-mempool censorship-resistance mechanisms is deliberate
 
 ![Public mempool, FOCIL, and VOPS comparison for the direct-owner path](../assets/erc-XXXX/public-mempool-vops.svg)
 
-This ERC's direct owner path preserves that shape. The user submits an ordinary transaction whose sender is the current NFT owner or whatever transaction flow ultimately causes the current owner contract to call the account. The NFT-controlled account is the destination of execution, not a new protocol-level sender type. In that respect, the direct owner path is more naturally aligned with VOPS than [EIP-8141](./eip-8141)'s general frame-transaction model, whose public mempool rules require nodes to simulate a validation prefix until `payer_approved = true`, enforce a bounded `MAX_VERIFY_GAS`, and reject prefixes that read disallowed state or use banned opcodes. The distinction is explained in more detail in "Frame Transactions Through a Statelessness Lens"[^1] and "Mempool Strategies for EIP-8141"[^2]. This does not mean that every [EIP-8141](./eip-8141) sender mode is incompatible with VOPS. It means this ERC does not require a new mempool-side EVM validation model for its ordinary direct-owner path.
+This ERC's direct owner path preserves that shape. The user submits an ordinary transaction whose sender is the current NFT owner or whatever transaction flow ultimately causes the current owner contract to call the account. When signed execution is implemented, it also preserves that shape: a relayer submits an ordinary transaction carrying the controller's [EIP-712](./eip-712) signature; the relayer is the protocol-level sender, and signature verification occurs during normal EVM execution. In both cases, the NFT-controlled account is the destination of execution, not a new protocol-level sender type. In that respect, both paths are more naturally aligned with VOPS than [EIP-8141](./eip-8141)'s general frame-transaction model, whose public mempool rules require nodes to simulate a validation prefix until `payer_approved = true`, enforce a bounded `MAX_VERIFY_GAS`, and reject prefixes that read disallowed state or use banned opcodes. The distinction is explained in more detail in "Frame Transactions Through a Statelessness Lens"[^1] and "Mempool Strategies for EIP-8141"[^2]. This does not mean that every [EIP-8141](./eip-8141) sender mode is incompatible with VOPS. It means this ERC does not require a new mempool-side EVM validation model for its direct-owner or signed execution paths.
 
 Alternative signing is addressed primarily at the root-controller layer rather than only inside account validators. [EIP-8202](./eip-8202) proposes a typed transaction whose `scheme_id` selects the signature algorithm, with initial schemes including secp256k1, P256/secp256r1, and post-quantum. Under this ERC, moving to a different root signing scheme or key-rotation can be as simple as transferring the controlling NFT to a different owner account that uses that scheme. Because the [EIP-8202](./eip-8202) text is still a draft pull request, this ERC treats it as a compatible owner model, not as a hard dependency.
 
@@ -107,6 +113,8 @@ For the purposes of this ERC:
 - **Transfer approval version** means a per-token monotonically increasing counter used internally to invalidate stale [ERC-721](./eip-721) single-token approvals on the controller token.
 - **Pending unlock delay change** means a requested reduction in `unlockDelayOf(tokenId)` that has been scheduled via `setUnlockDelay` but has not yet taken effect. Increases to the unlock delay take effect immediately and never produce a pending change. A pending change is surfaced by the `UnlockDelayChangePending` event and the `pendingUnlockDelayOf` view.
 - **Deployed account** means an account whose controller token has been minted and whose runtime code has been deployed at the encoded address.
+- **Signed execution** means an execution request authorized by the controller's [EIP-712](./eip-712) signature and submitted by a third-party relayer, rather than by a direct transaction from the controller.
+- **Execution nonce** means a per-account monotonically increasing counter that provides replay protection for signed execution requests.
 
 ### Token model
 
@@ -336,7 +344,7 @@ A compliant account MUST implement arbitrary call execution and atomic batch exe
 - return ordered raw return data on success,
 - revert the entire batch if any call fails.
 
-`isExecutionActive()` MUST return `true` whenever the account has an `execute`, `executeBatch`, or revocation call in progress, and `false` otherwise. The implementation MUST correctly handle nested and reentrant execution so that the flag remains active until all active frames have exited successfully or reverted.
+`isExecutionActive()` MUST return `true` whenever the account has an `execute`, `executeBatch`, signed execution (`executeWithSignature`, `executeBatchWithSignature` if implemented), or revocation call in progress, and `false` otherwise. The implementation MUST correctly handle nested and reentrant execution so that the flag remains active until all active frames have exited successfully or reverted.
 
 The RECOMMENDED implementation is a reference-counted flag in transient storage (`TSTORE`/`TLOAD`): increment on entry, decrement on successful exit, and rely on EVM revert semantics to roll back transient-storage writes on failure without an explicit decrement on the revert path. Other mechanisms that provide the same behavioral guarantee - `isExecutionActive()` returns `true` during execution, `false` otherwise, correctly across nesting and revert - are compliant.
 
@@ -345,6 +353,89 @@ The RECOMMENDED implementation is a reference-counted flag in transient storage 
 ![executeBatch position rebalance workflow](../assets/erc-XXXX/execute-batch-rebalance-workflow.svg)
 
 A user MUST be able to perform `approve + swap`, `approve + call`, `withdraw + settle + transfer`, or similar ordered actions as one ordinary transaction from the current NFT owner to `executeBatch`.
+
+### Signed execution
+
+A compliant account SHOULD implement signed execution for both single calls and batches. Signed execution allows any third party to submit an execution request authorized by the controller's [EIP-712](./eip-712) signature. The submitter pays gas; the controller never sends a transaction.
+
+Signed execution provides three properties that direct owner execution alone does not:
+
+1. **Gas sponsorship without infrastructure.** Any address with ETH can relay a signed execution request as an ordinary transaction. No EntryPoint singleton, bundler network, or paymaster protocol is required. This makes gas sponsorship accessible for onboarding, single-operation sponsorship, mobile-to-backend relay, and any context where full [ERC-4337](./eip-4337) infrastructure is disproportionate.
+2. **Censorship resistance via FOCIL compatibility.** [EIP-7805](./eip-7805) FOCIL builds inclusion lists from transactions pending in the public mempool and checks omitted transactions on the execution layer by verifying that the missing transaction could still be validly included based on remaining gas and the sender's nonce and balance. Because the relayer submits an ordinary protocol transaction, the signed execution request is a regular mempool object that inclusion-list builders can observe and that the execution-layer omission check can verify — identically to direct owner execution. [ERC-4337](./eip-4337) `UserOperation`s are off-protocol mempool objects and do not receive this inclusion-list coverage.
+3. **Statelessness via VOPS compatibility.** VOPS[^3] argues that nodes should retain just enough account data to validate pending transactions locally so they can maintain a public mempool and participate in FOCIL. For signed execution, the only validation-critical state is the relayer's nonce and balance — the same sender-account data nodes already maintain for any ordinary transaction. No account-specific validation logic, no banned-opcode checks, no `MAX_VERIFY_GAS` simulation, no reading of the controlled account's state during mempool admission. [ERC-4337](./eip-4337) `UserOperation` validation requires simulating account-specific verification code and reading validation-critical account state, which is the additional dependency that VOPS seeks to avoid. Signed execution is therefore the only gas-sponsored execution path under this ERC that preserves VOPS compatibility.
+4. **Standardized validator-driven execution.** Without signed execution, validators installed on the account can validate signatures ([ERC-1271](./eip-1271)) but have no standard way to authorize execution. Signed execution closes that gap: a session-key validator, automated-strategy validator, or delegated signer approves the signed execution request through the same `isValidSignatureForAccount` interface it already implements, and the account proceeds to execute. This makes delegated execution a native capability without requiring [ERC-4337](./eip-4337) or a non-standard execution entrypoint.
+
+Accounts that are operated exclusively through direct owner execution (for example, child accounts in a hierarchy that are always called by their parent) MAY omit signed execution. Accounts that intend to support gas sponsorship, relayed execution, or validator-driven execution (session keys, automated strategies, delegated signers) SHOULD implement signed execution as defined in this section rather than inventing a non-standard execution interface.
+
+If an account implements signed execution, the following requirements apply. Within this section, "MUST" refers to requirements on implementations that include signed execution.
+
+The account MUST maintain a per-account execution nonce that starts at `0` and increments by `1` on each successful signed execution. `executionNonceOf()` MUST return the current nonce value.
+
+The account MUST define the following [EIP-712](./eip-712) type hashes for signed execution, using the account's [ERC-5267](./eip-5267) domain:
+
+```
+ExecuteRequest(address target,uint256 value,bytes data,uint256 nonce,uint256 deadline)
+```
+
+```
+ExecuteBatchRequest(Call[] calls,uint256 nonce,uint256 deadline)Call(address target,uint256 value,bytes data)
+```
+
+The `Call` struct type MUST be included in the `ExecuteBatchRequest` type encoding as a referenced type per [EIP-712](./eip-712) section on referencing other structs.
+
+Because the account's [ERC-5267](./eip-5267) domain `salt` includes the current `controlVersion`, all signed execution requests are automatically invalidated when the controlling NFT transfers or when `resetDelegations` is called. No additional version field is needed in the signed message.
+
+`executeWithSignature(target, value, data, nonce, deadline, signature)` MUST:
+
+- be callable by any address,
+- revert if `block.timestamp > deadline`,
+- revert if `nonce != executionNonceOf()`,
+- revert unless `locked(tokenId)` on the controller token is `true` AND `unlockReadyAt(tokenId)` on the controller token is `0`,
+- compute the [EIP-712](./eip-712) struct hash of an `ExecuteRequest` with the provided parameters using the account's [ERC-5267](./eip-5267) domain,
+- validate the signature against the resulting digest using the signature validation cascade defined below,
+- revert if signature validation fails,
+- increment the execution nonce,
+- ensure `isExecutionActive()` returns `true` for the duration of the call,
+- perform a single `CALL` to `target` with `value` and `data`,
+- return the raw return data on success,
+- bubble callee revert data exactly on failure.
+
+`executeBatchWithSignature(calls, nonce, deadline, signature)` MUST:
+
+- be callable by any address,
+- revert if `block.timestamp > deadline`,
+- revert if `nonce != executionNonceOf()`,
+- revert unless `locked(tokenId)` on the controller token is `true` AND `unlockReadyAt(tokenId)` on the controller token is `0`,
+- compute the [EIP-712](./eip-712) struct hash of an `ExecuteBatchRequest` with the provided parameters using the account's [ERC-5267](./eip-5267) domain,
+- validate the signature against the resulting digest using the signature validation cascade defined below,
+- revert if signature validation fails,
+- increment the execution nonce,
+- ensure `isExecutionActive()` returns `true` for the duration of the batch,
+- execute calls in order,
+- be atomic,
+- return ordered raw return data on success,
+- revert the entire batch if any call fails.
+
+Both functions MUST accept `msg.value` forwarded by the relayer. ETH sent by the relayer is available for calls within the execution. If `msg.value` exceeds the total value consumed by the execution, the excess remains in the account.
+
+#### Signature validation cascade for signed execution
+
+The account MUST validate signatures for signed execution using the following cascade, applied to the [EIP-712](./eip-712) digest computed from the execution request:
+
+1. **EOA controller.** If the current `ownerOf(tokenId)` is an EOA, attempt `ecrecover` on the digest. If recovery yields the controller address, the signature is valid.
+2. **Contract controller.** If the current `ownerOf(tokenId)` is a contract that implements [ERC-1271](./eip-1271), forward the digest and signature to the controller's `isValidSignature`. If the controller returns the [ERC-1271](./eip-1271) magic value, the signature is valid.
+3. **Active validators.** If steps 1 and 2 do not produce a valid result, the account MUST iterate over active validators for the current control version. For each active validator, call `isValidSignatureForAccount(address(this), digest, signature)`. If any validator returns the expected magic value, the signature is valid.
+4. **Failure.** If no step produces a valid result, the signed execution MUST revert.
+
+This cascade is identical in structure to the [ERC-1271](./eip-1271) validation path defined in this ERC. The difference is that a successful result authorizes execution rather than confirming a message signature.
+
+#### Replay protection
+
+The sequential execution nonce provides replay protection within a single control version. The control-version binding in the [ERC-5267](./eip-5267) domain `salt` provides replay protection across control versions: a signed execution request prepared under control version `N` produces a different [EIP-712](./eip-712) digest under control version `N+1` even if the nonce, deadline, and call parameters are identical. Together, these two mechanisms ensure that no signed execution request can be replayed.
+
+The execution nonce MUST NOT be shared with or affected by direct owner execution via `execute` or `executeBatch`. Direct execution uses the sender's protocol-level nonce; signed execution uses the account-level execution nonce. The two are independent.
+
+The execution nonce MUST be reset to `0` when `controlVersionOf(tokenId)` increments. Because the domain `salt` changes on every control-version increment, all previously signed requests are already structurally invalid regardless of nonce value. Resetting the nonce avoids requiring the new controller to discover and skip an arbitrary nonce left by the previous controller.
 
 ### Approval revocation interface
 
@@ -374,9 +465,13 @@ Replay protection for such ordinary transactions is provided by the replay model
 
 If the current owner is a scheme-agile owner account under a model such as [EIP-8202](./eip-8202), replay handling for the owner's transaction belongs to that owner-account transaction type, not to this ERC. The NFT-controlled account only sees the resulting caller address.
 
+#### Signed execution
+
+Replay protection for signed execution is provided by the account-level execution nonce defined in the Signed execution section. The execution nonce is independent of the sender's protocol-level nonce and independent of any [ERC-4337](./eip-4337) nonce. The control-version binding in the [ERC-5267](./eip-5267) domain `salt` ensures that signed requests prepared under a previous control version cannot be replayed after a transfer or `resetDelegations` call, even if the execution nonce has been reset. The `deadline` parameter provides time-bounded validity so that a signed request does not remain valid indefinitely within the current control version.
+
 #### ERC-4337 compatibility
 
-A compliant account MAY implement [ERC-4337](./eip-4337) for sponsored or relayed execution. If it does, authorization MUST be bound to the current control version so that a transfer of the controlling NFT invalidates any pending `UserOperation`s signed under the previous version. All other [ERC-4337](./eip-4337) semantics (nonces, EntryPoint, paymasters, bundler rules) are defined by [ERC-4337](./eip-4337) itself and are not redefined here.
+A compliant account MAY additionally implement [ERC-4337](./eip-4337) for integration with the bundler marketplace, paymaster ecosystem, and [ERC-4337](./eip-4337) tooling. Accounts that implement signed execution do not require [ERC-4337](./eip-4337) for gas-sponsored or relayed execution. If an account implements [ERC-4337](./eip-4337), authorization MUST be bound to the current control version so that a transfer of the controlling NFT invalidates any pending `UserOperation`s signed under the previous version. All other [ERC-4337](./eip-4337) semantics (nonces, EntryPoint, paymasters, bundler rules) are defined by [ERC-4337](./eip-4337) itself and are not redefined here.
 
 #### ERC-1271 message validation
 
@@ -436,19 +531,19 @@ Validators MAY implement:
 - social-recovery preparation flows for off-chain approvals,
 - [ERC-7913](./eip-7913)-style address-less signer descriptions or verifier-based key models.
 
-Validators are privileged for the signature-validation paths they service. Validator installation SHOULD therefore be treated as a sensitive delegation for the active control version, even though the base ERC does not define validator-driven execution entrypoints.
+Validators are privileged for the signature-validation paths they service. If the account implements signed execution, validators also participate in the signature validation cascade for `executeWithSignature` and `executeBatchWithSignature`, meaning a validator that approves a signed execution request is authorizing account execution, not merely confirming a message signature. Validator installation SHOULD therefore be treated as a sensitive delegation for the active control version. When signed execution is implemented, session-key validators, automated-strategy validators, and other delegated-signer models can authorize execution through the signed execution path without requiring [ERC-4337](./eip-4337) or a non-standard execution interface.
 
 ### Public mempool, FOCIL, and VOPS considerations
 
-A compliant account MUST preserve the direct-owner ordinary-transaction execution path defined above. That path is the canonical public-mempool-visible execution path for this ERC.
+A compliant account MUST preserve the direct-owner ordinary-transaction execution path defined above. That path is the canonical public-mempool-visible execution path for this ERC. If an account implements signed execution, that path is also public-mempool-visible.
 
-For [EIP-7805](./eip-7805), the relevant object is the outer protocol transaction that ultimately reaches the account, not an internal `CALL` into the account. If the current controller is an EOA or a scheme-agile owner account, that outer transaction is the controller's own transaction. If the current controller is a multisig or other contract, the relevant object is the outer transaction that causes that owner contract to call the account. This ERC does not define a new protocol transaction type.
+For [EIP-7805](./eip-7805), the relevant object is the outer protocol transaction that ultimately reaches the account, not an internal `CALL` into the account. For direct owner execution, the outer transaction is the controller's own transaction (or whatever transaction flow causes the controller to call the account). For signed execution, the outer transaction is the relayer's transaction. In both cases, the outer transaction is an ordinary protocol transaction. This ERC does not define a new protocol transaction type.
 
-This ERC does not require public-mempool nodes to execute account-specific validation logic merely to determine whether an ordinary direct-owner transaction belongs in the public mempool. The account's control check occurs during ordinary EVM execution. Public-mempool admissibility for the direct-owner path is therefore governed by the underlying transaction type rather than by an ERC-specific validation prefix.
+This ERC does not require public-mempool nodes to execute account-specific validation logic merely to determine whether a direct-owner or signed-execution transaction belongs in the public mempool. For direct owner execution, the account's control check occurs during ordinary EVM execution. For signed execution, signature verification also occurs during ordinary EVM execution after the relayer's transaction has been included. Public-mempool admissibility for both paths is therefore governed by the underlying transaction type (specifically the relayer's sender nonce and balance for signed execution) rather than by an ERC-specific validation prefix.
 
-This property is intentional. [EIP-7805](./eip-7805) inclusion lists are built from the public mempool, and omitted transactions are checked on the execution layer by asking whether the missing transaction would still be validly includable based on remaining gas and the sender's nonce and balance. VOPS argues that nodes should keep enough account data to validate pending transactions locally so they can maintain the public mempool and participate in FOCIL. The direct-owner path of this ERC fits that model.
+This property is intentional. [EIP-7805](./eip-7805) inclusion lists are built from the public mempool, and omitted transactions are checked on the execution layer by asking whether the missing transaction would still be validly includable based on remaining gas and the sender's nonce and balance. VOPS argues that nodes should keep enough account data to validate pending transactions locally so they can maintain the public mempool and participate in FOCIL. The direct-owner path fits that model because the sender is the controller. When signed execution is implemented, it also fits: the sender is the relayer, whose nonce and balance are sufficient for local validation.
 
-If an account additionally implements [ERC-4337](./eip-4337), individual `UserOperation`s are not protocol transactions and do not automatically receive the same public-mempool properties. The strongest FOCIL compatibility of this ERC is its direct-owner transaction path.
+If an account additionally implements [ERC-4337](./eip-4337), individual `UserOperation`s are not protocol transactions and do not automatically receive the same public-mempool properties. The strongest FOCIL compatibility of this ERC is through its direct-owner path and, when implemented, its signed execution path.
 
 ### Recovery
 
@@ -591,6 +686,27 @@ interface IERCXXXXAccount {
 
     function isExecutionActive() external view returns (bool);
 
+    // Signed execution (OPTIONAL) - callable by any address with a valid controller signature.
+    // Accounts that support gas sponsorship, relayed execution, or validator-driven
+    // execution SHOULD implement these functions.
+    function executeWithSignature(
+        address target,
+        uint256 value,
+        bytes calldata data,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external payable returns (bytes memory result);
+
+    function executeBatchWithSignature(
+        Call[] calldata calls,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external payable returns (bytes[] memory results);
+
+    function executionNonceOf() external view returns (uint256);
+
     // Approval revocation - callable during unlock freeze.
     struct ERC20Revocation { address token; address spender; }
     struct ERC721Revocation { address token; uint256 tokenId; }
@@ -654,7 +770,7 @@ interface IERCXXXXValidator {
 }
 ```
 
-A compliant account SHOULD also implement [ERC-1271](./eip-1271) when off-chain signature verification is desired. Accounts that additionally implement [ERC-4337](./eip-4337) MAY extend the validator interface with `validateUserOp` or equivalent methods as needed.
+A compliant account SHOULD also implement [ERC-1271](./eip-1271) when off-chain signature verification is desired. The `isValidSignatureForAccount` function on validators services [ERC-1271](./eip-1271) message validation and, if signed execution is implemented, also the signed execution path: in the former case a successful result confirms a message signature, in the latter it authorizes account execution. Accounts that additionally implement [ERC-4337](./eip-4337) MAY extend the validator interface with `validateUserOp` or equivalent methods as needed.
 
 ### Events
 
@@ -815,6 +931,27 @@ This flow applies equally to key rotation, account sale, gift, or organizational
 5. The batch executes atomically.
 6. If broadcast through the public mempool, the outer transaction is visible to [EIP-7805](./eip-7805) inclusion-list builders.
 
+#### Signed execution with gas sponsorship
+
+1. Bob owns `T` and controls account `A`.
+2. Bob signs an [EIP-712](./eip-712) `ExecuteBatchRequest` containing an `approve + swap` batch, with the current execution nonce and a deadline 5 minutes in the future.
+3. Bob sends the signed request to a relayer (a dapp backend, a friend, or any willing third party).
+4. The relayer submits an ordinary transaction to `A.executeBatchWithSignature(...)`, paying gas.
+5. The account computes the [EIP-712](./eip-712) digest, recovers Bob's address via `ecrecover`, and confirms it matches `ownerOf(T)`.
+6. The execution nonce increments and the batch executes atomically.
+7. The relayer's transaction is a regular protocol transaction, visible to [EIP-7805](./eip-7805) inclusion-list builders.
+8. Bob never sent a transaction or paid gas.
+
+#### Signed execution via session-key validator
+
+1. Bob owns `T` and controls account `A`.
+2. Bob installs a session-key validator on `A` for the current control version, authorizing a hot key `H` to execute swaps on a specific DEX router up to a daily spending limit.
+3. The session-key holder signs an [EIP-712](./eip-712) `ExecuteRequest` targeting the DEX router.
+4. A relayer (or the session-key holder directly) submits the signed request to `A.executeWithSignature(...)`.
+5. The account's signature validation cascade fails `ecrecover` (the signer is `H`, not Bob) and fails the contract-controller check, then reaches the session-key validator.
+6. The validator verifies the signature against `H`, checks the target, value, and spending limit, and returns the magic value.
+7. The execution proceeds. Bob's root key was never involved.
+
 #### Create a hierarchical asset tree
 
 1. Alice controls parent account `P` through controlling token `T_P`.
@@ -829,7 +966,7 @@ This flow applies equally to key rotation, account sale, gift, or organizational
 
 1. A sponsor or relayer calls `deployAccount(initialOwner = Bob)` to deploy account `A` and mint controller token `T` to Bob.
 2. Bob has a valid withdrawal note or proof for an external privacy protocol.
-3. If the implementation supports optional relayed execution, the sponsor or relayer submits that relayed call to `A`.
+3. Bob signs an `ExecuteBatchRequest` containing the withdrawal call and any downstream operations. The sponsor or relayer submits the signed request via `executeBatchWithSignature` on `A`.
 4. The batch includes the withdrawal call, settlement, and any downstream transfer.
 5. Privacy depends on the privacy protocol and operational context, not on this ERC alone.
 
@@ -851,7 +988,21 @@ Compared with conventional smart contract wallets, this design makes root contro
 
 ### Compared with generic smart-account standards
 
-Compared with generic smart-account standards, this design imposes a specific root-control source. That is better when the system wants transferability and address-encoded discoverability. It is worse when applications want maximum freedom in choosing root authorization schemes or when transferability of root control is undesirable. The account MAY additionally implement [ERC-4337](./eip-4337) for sponsored or relayed execution, but this ERC does not require or redefine it.
+Compared with generic smart-account standards, this design imposes a specific root-control source. That is better when the system wants transferability and address-encoded discoverability. It is worse when applications want maximum freedom in choosing root authorization schemes or when transferability of root control is undesirable.
+
+### Signed execution and the relationship to ERC-4337
+
+This ERC defines signed execution as a native gas-sponsorship mechanism rather than deferring entirely to [ERC-4337](./eip-4337). The rationale is that [ERC-4337](./eip-4337) conflates two separable concerns: (1) "someone else pays gas for my operation" and (2) "a competitive marketplace of bundlers and paymasters facilitates that sponsorship at scale." Concern (1) is simple: a controller signs an [EIP-712](./eip-712) execution request, anyone submits it, and the account verifies the signature during normal EVM execution. Concern (2) requires the EntryPoint singleton, bundler validation rules, paymaster settlement protocol, banned opcode lists, and the full [ERC-4337](./eip-4337) infrastructure stack. This ERC solves (1) natively and leaves (2) as an optional integration for accounts that need it.
+
+The native approach has three structural advantages:
+
+**FOCIL and VOPS compatibility.** The relayer's transaction is an ordinary protocol transaction. Nodes validate it by the relayer's sender nonce and balance, not by simulating account-specific validation logic. The signed execution path therefore receives the same public-mempool inclusion-list coverage as direct owner execution. [ERC-4337](./eip-4337) `UserOperation`s do not receive this property because they are off-protocol mempool objects with their own validation rules.
+
+**Zero-infrastructure sponsorship.** Any address with ETH can relay a signed execution request. No EntryPoint deployment, no bundler registration, no paymaster integration. A dapp backend, a friend, a CLI script, or an automated service can submit the transaction. This makes gas sponsorship accessible to use cases where the full [ERC-4337](./eip-4337) infrastructure is disproportionate - onboarding a new user, sponsoring a single operation, or relaying from a mobile device through a lightweight backend.
+
+**Validator-driven execution without ERC-4337.** Session keys, automated strategies, and other delegated-signer models require an execution entrypoint that accepts non-controller signatures. Without signed execution, this ERC would either need to define a separate validator execution interface or defer entirely to [ERC-4337](./eip-4337) `validateUserOp`. Signed execution provides that entrypoint natively: a validator approves the signed execution request through the same `isValidSignatureForAccount` interface it already implements for [ERC-1271](./eip-1271), and the account proceeds to execute. This unifies message validation and execution authorization under a single validator interface.
+
+[ERC-4337](./eip-4337) remains valuable when an account wants the bundler marketplace for competitive relay pricing, the paymaster protocol for on-chain gas sponsorship settlement, aggregated signature support for throughput, or integration with existing [ERC-4337](./eip-4337) tooling and SDKs. The account MAY implement [ERC-4337](./eip-4337) in addition to signed execution; the two paths are not mutually exclusive. The design choice is that basic gas sponsorship should not require external infrastructure, while advanced relay economics remain available through [ERC-4337](./eip-4337) integration.
 
 ### Composable execution via ERC-8211
 
@@ -861,7 +1012,7 @@ This ERC's `executeBatch` is a static batch: every target, value, and calldata b
 
 Relative to [EIP-8141](./eip-8141), this ERC deliberately keeps its baseline execution path on top of ordinary transaction validity. [EIP-8141](./eip-8141) moves authorization into a programmable validation prefix and requires public mempool nodes to simulate that prefix until `payer_approved = true`, under gas, opcode, and state-access rules. The "Mempool Strategies for EIP-8141" note[^2] and "Frame Transactions Through a Statelessness Lens"[^1] explain that this can shift mempool validation from a simple sender-account lookup to executing verification code and depending on additional validation-critical state.
 
-That is the sense in which this ERC is more compatible with VOPS[^3] than [EIP-8141](./eip-8141): the direct-owner path keeps the public-mempool object as a regular transaction, so a node that maintains account data for local transaction validity can still track, propagate, and inclusion-list those transactions under [EIP-7805](./eip-7805). The claim is limited. It does not mean every sponsored or validator-mediated flow under this ERC automatically receives the same property, and it does not mean every [EIP-8141](./eip-8141) sender mode is equally expensive. It means the baseline path of this ERC does not require a new mempool-side EVM validation model.
+That is the sense in which this ERC is more compatible with VOPS[^3] than [EIP-8141](./eip-8141): both the direct-owner path and the signed execution path keep the public-mempool object as a regular transaction, so a node that maintains account data for local transaction validity can still track, propagate, and inclusion-list those transactions under [EIP-7805](./eip-7805). The signed execution path extends this property to gas-sponsored operations: the relayer's transaction is validated by the relayer's nonce and balance, not by account-specific validation logic. The claim is limited. It does not mean every [ERC-4337](./eip-4337) flow or every [EIP-8141](./eip-8141) sender mode automatically receives the same property. It means the native execution paths of this ERC - both direct and signed - do not require a new mempool-side EVM validation model.
 
 ### Operational NFT
 
@@ -906,9 +1057,9 @@ Migration is not automatic. An [ERC-6551](./eip-6551) account does not become co
 
 This ERC is partially backward compatible with [ERC-721](./eip-721) tooling because the controlling token is still an [ERC-721](./eip-721) token. Existing wallet and custody systems can hold and transfer it. However, generic NFT tooling MAY not understand that approving or transferring the token changes control of a separate smart account. [ERC-721](./eip-721) tooling compatibility is therefore mechanical, not semantic.
 
-This ERC is compatible with [ERC-1271](./eip-1271)-aware applications when an account implements that interface. Accounts that additionally implement [ERC-4337](./eip-4337) are compatible with existing smart-account tooling.
+This ERC is compatible with [ERC-1271](./eip-1271)-aware applications when an account implements that interface. Accounts that additionally implement [ERC-4337](./eip-4337) are compatible with existing smart-account tooling. If signed execution is implemented, it is compatible with any system that can submit an ordinary Ethereum transaction; no [ERC-4337](./eip-4337) bundler or EntryPoint is required for gas-sponsored execution.
 
-This ERC is also compatible with [EIP-7805](./eip-7805) in the limited sense that direct owner execution remains an ordinary public-mempool transaction that can be observed by inclusion-list builders.
+This ERC is also compatible with [EIP-7805](./eip-7805): direct owner execution is an ordinary public-mempool transaction that can be observed by inclusion-list builders. When signed execution is implemented, relayer transactions are likewise ordinary public-mempool transactions with the same property.
 
 This ERC does not require [EIP-7702](./eip-7702) or [EIP-8202](./eip-8202), but it is compatible with owner accounts using those models.
 
@@ -955,6 +1106,22 @@ Replay attacks remain important. [ERC-1271](./eip-1271) permits arbitrary valida
 For interoperable structured-data signatures, this ERC uses [ERC-7739](./eip-7739) over an [ERC-5267](./eip-5267)-discoverable account domain rather than an implementation-defined bound-hash format. The account domain's `salt` binds the controller token, tokenId, and current control version; `verifyingContract` binds the account address; and `chainId` binds the chain. This is the canonical `ERC-1271` typed-signature path for this ERC.
 
 Signature malleability matters wherever ECDSA is used. Implementations MUST reject malleable signatures and invalid recovery parameters. Validator implementations for other schemes MUST enforce the corresponding anti-malleability or canonical-encoding rules for their scheme.
+
+### Signed execution security
+
+Signed execution introduces a public-facing execution entrypoint callable by any address. The following risks are specific to this path:
+
+**Relayer front-running.** A relayer who observes a signed execution request in the public mempool can extract it and resubmit it from a different relayer address. This is not harmful to the controller: the nonce prevents replay, the deadline bounds validity, and the controller's intended operation executes regardless of which address submits it. The relayer who originally received the request loses the gas refund or fee they expected, but the controller's assets and intent are unaffected. If relayer-identity binding is needed (e.g. for fee attribution), the controller can include a relayer-specific call in the batch or use a private relay channel.
+
+**Sequential nonce serialization.** The sequential execution nonce means that signed execution requests must be submitted in order. Two concurrent signed requests with nonces `N` and `N+1` must land in that order; if `N+1` is submitted first, it reverts. This is a deliberate simplicity tradeoff: a sequential nonce is cheap to verify (one SLOAD), easy to reason about, and sufficient for the common case where signed execution requests are prepared one at a time. Use cases requiring concurrent non-ordered signed operations MAY use [ERC-4337](./eip-4337), whose 2D nonce model supports parallel non-conflicting operations.
+
+**Deadline-free signatures.** If a controller sets `deadline = type(uint256).max`, the signed request is valid for the entire lifetime of the current control version. This is not a vulnerability - the controller chose it - but it means the request can be submitted at any future time, possibly under market conditions the controller did not anticipate. Wallets SHOULD default to short deadlines (minutes, not hours) and SHOULD warn users who set very long deadlines.
+
+**Validator-authorized execution.** When a validator approves a signed execution request, it authorizes arbitrary execution on the account, not merely a signature confirmation. A malicious or buggy validator can therefore authorize account-draining operations through the signed execution path. This risk already exists for [ERC-1271](./eip-1271) validators in off-chain contexts, but signed execution makes it directly exploitable on-chain. Validator installation remains a sensitive operation that SHOULD be treated as root-level delegation.
+
+**Execution nonce reset on transfer.** The execution nonce resets to `0` when `controlVersionOf(tokenId)` increments. This is safe because the domain `salt` changes, structurally invalidating all prior signed requests regardless of nonce. However, implementations MUST ensure that the nonce reset and the domain-salt change are atomic with respect to the control-version increment. A window in which the nonce has reset but the old domain salt is still readable would allow replay of a previous version's nonce-0 request.
+
+**`msg.value` forwarding.** Signed execution functions are `payable`, allowing relayers to forward ETH. If `msg.value` exceeds the total value consumed by calls in the execution, the excess remains in the account - it does not return to the relayer. Relayers SHOULD calculate the exact value needed. Controllers SHOULD be aware that a relayer can send unexpected ETH to the account through this path, though this is equivalent to anyone sending ETH to the account's `receive()` function.
 
 Reentrancy risk is inherent in arbitrary execution. `execute` and `executeBatch` call arbitrary targets. Implementations SHOULD ensure that sensitive state transitions, such as validator installation state or recovery-related state, cannot be corrupted by reentrant execution.
 
@@ -1038,15 +1205,21 @@ A reference implementation SHOULD:
 - make `executeBatch` fully atomic,
 - rely on EVM transient-storage revert semantics rather than manually decrementing transient execution depth on the revert path,
 - avoid `SELFDESTRUCT` in the account implementation,
-- avoid transfer hooks from the controller token into the account.
+- avoid transfer hooks from the controller token into the account,
+- implement signed execution (`executeWithSignature`, `executeBatchWithSignature`) when the account intends to support gas sponsorship, relayed execution, or validator-driven execution (session keys, automated strategies, delegated signers),
+- use the same signature validation cascade for signed execution and [ERC-1271](./eip-1271): `ecrecover` → contract-controller `isValidSignature` → active validators,
+- apply the same unlock-freeze, execution-active, and control-version checks to signed execution as to direct execution,
+- reset the execution nonce to `0` atomically with every control-version increment,
+- default to short deadlines (minutes) in wallet UIs for signed execution requests,
+- expose `executionNonceOf()` so relayers can query the current nonce before submission.
 
-Implementations that support [ERC-1271](./eip-1271) SHOULD verify root-controller signatures by first attempting `ecrecover` against the controller address, then forwarding the account-bound final hash to the controller's `isValidSignature` if it is an [ERC-1271](./eip-1271) contract, and finally delegating to active validators. If the root controller uses a scheme-agile transaction type rather than a contract-signature interface, or if recursive [ERC-7739](./eip-7739) wrapping would prevent contract-signature chaining, a validator MUST be installed for [ERC-1271](./eip-1271) paths to function.
+Implementations SHOULD verify root-controller signatures (for [ERC-1271](./eip-1271) and, if implemented, signed execution) by first attempting `ecrecover` against the controller address, then forwarding the digest to the controller's `isValidSignature` if it is an [ERC-1271](./eip-1271) contract, and finally delegating to active validators. If the root controller uses a scheme-agile transaction type rather than a contract-signature interface, or if recursive [ERC-7739](./eip-7739) wrapping would prevent contract-signature chaining, a validator MUST be installed for [ERC-1271](./eip-1271) and signed execution paths to function.
 
 Implementations that support [ERC-6492](./eip-6492) SHOULD ensure the wrapper invokes the factory's `deployAccount` with the intended `initialOwner`.
 
 Implementations that support [EIP-7702](./eip-7702)-aware or [EIP-8202](./eip-8202)-aware owners SHOULD document that those owner-account models affect the root controller's execution environment, while the custody wallet under this ERC remains the separate contract account. In particular, [EIP-7702](./eip-7702)-delegated EOAs SHOULD be described to users as programmable owner accounts, not as ordinary EOAs with unchanged trust assumptions.
 
-Implementations that additionally support [ERC-4337](./eip-4337) SHOULD bind `UserOperation` authorization to the current control version so that NFT transfers invalidate pending operations. When [ERC-4337](./eip-4337) account setup requires initialization, the deployer MAY atomically deploy with itself as `initialOwner`, perform setup via `execute` or `executeBatch`, and transfer the controlling NFT to the intended recipient, all within a single transaction.
+Implementations that additionally support [ERC-4337](./eip-4337) SHOULD bind `UserOperation` authorization to the current control version so that NFT transfers invalidate pending operations. [ERC-4337](./eip-4337) is not required for gas sponsorship when signed execution is implemented, but remains useful for bundler marketplace integration, paymaster settlement, and aggregated signature support. When [ERC-4337](./eip-4337) account setup requires initialization, the deployer MAY atomically deploy with itself as `initialOwner`, perform setup via `execute` or `executeBatch`, and transfer the controlling NFT to the intended recipient, all within a single transaction.
 
 [^1]: Carlos Perez, "Frame Transactions Through a Statelessness Lens," *Ethereum Research* (Execution Layer Research), March 29, 2026.
 
