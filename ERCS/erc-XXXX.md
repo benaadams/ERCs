@@ -794,6 +794,7 @@ event AccountDeployed(
 event Executed(
     address indexed caller,
     address indexed target,
+    bytes4 indexed selector,
     uint256 value,
     bytes32 dataHash,
     bytes32 resultHash
@@ -851,6 +852,8 @@ event UnlockDelayChangePending(
 ```
 
 Implementations SHOULD consider using [ERC-6093](./eip-6093)-style custom errors where appropriate, especially for controller-token operations that naturally map to standardized token failure modes such as invalid sender, invalid receiver, insufficient approval, or unauthorized transfer attempts. This ERC does not require [ERC-6093](./eip-6093) support, but aligning revert surfaces with that error vocabulary improves interoperability with tooling and integrators.
+
+`selector` MUST be the first four bytes of `data` (the function selector), or `bytes4(0)` if `data` is empty (plain ETH transfer). Because `selector` is an indexed topic, it enables event-based filtering by operation type without requiring transaction trace access.
 
 `dataHash` MUST be `keccak256(data)` where `data` is the calldata passed to the target. `resultHash` MUST be `keccak256(result)` where `result` is the raw return data from the call. For empty calldata or empty return data, the hash MUST be `keccak256("")`. Full calldata and return data are available through transaction traces and are not duplicated in event logs to avoid per-byte log gas costs that scale linearly with payload size.
 
